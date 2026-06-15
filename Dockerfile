@@ -32,6 +32,8 @@ RUN apt-get update && \
 RUN update-ca-certificates
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV YTDLP_PATH=/usr/local/bin/yt-dlp
+ENV YTDLP_UPDATE_MODE=pip
+ENV YTDLP_PYTHON_PATH=/usr/bin/python3
 
 COPY --from=builder /telegram-media-server /telegram-media-server
 COPY locales /app/locales

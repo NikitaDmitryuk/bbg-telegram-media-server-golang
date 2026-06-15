@@ -88,7 +88,9 @@ func resumeIncompleteQBittorrentDownload(ctx context.Context, a *App, movie *dat
 		if err == nil {
 			logutils.Log.WithField("movie_id", movie.ID).Info("Resumed qBittorrent download completed successfully")
 			if cleanupErr := filemanager.DeleteTemporaryFilesByMovieID(movie.ID, a.Config.MoviePath, a.DB, a.DownloadManager); cleanupErr != nil {
-				logutils.Log.WithError(cleanupErr).WithField("movie_id", movie.ID).Warn("Failed to delete temporary files after resumed download")
+				logutils.Log.WithError(cleanupErr).
+					WithField("movie_id", movie.ID).
+					Warn("Failed to delete temporary files after resumed download")
 			}
 			return
 		}
