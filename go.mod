@@ -9,7 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackpal/bencode-go v1.0.2
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
-	golang.org/x/text v0.37.0
+	golang.org/x/text v0.38.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
