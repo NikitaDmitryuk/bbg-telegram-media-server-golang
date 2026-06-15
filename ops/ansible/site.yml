@@ -134,7 +134,7 @@
   tasks:
     - name: Install runtime packages
       ansible.builtin.pacman:
-        name: "{{ ['ffmpeg', 'yt-dlp', 'aria2', 'qbittorrent-nox', 'python'] + (['minidlna'] if tms_enable_minidlna_effective else []) + (['nodejs', 'npm'] if openclaw_enabled_effective else []) + (['privoxy'] if (openclaw_enabled_effective and telegram_proxy_effective.startswith('socks5://')) else []) }}"
+        name: "{{ ['ffmpeg', 'aria2', 'qbittorrent-nox', 'python', 'python-pip', 'python-virtualenv'] + (['minidlna'] if tms_enable_minidlna_effective else []) + (['nodejs', 'npm'] if openclaw_enabled_effective else []) + (['privoxy'] if (openclaw_enabled_effective and telegram_proxy_effective.startswith('socks5://')) else []) }}"
         state: present
         update_cache: true
       tags: packages
@@ -248,6 +248,36 @@
         append: true
       failed_when: false
       tags: users
+
+    - name: Create yt-dlp Python venv
+      ansible.builtin.command:
+        argv:
+          - python
+          - -m
+          - venv
+          - "{{ tms_ytdlp_venv_dir }}"
+        creates: "{{ tms_ytdlp_python_path }}"
+      become_user: "{{ tms_user }}"
+      tags:
+        - packages
+        - ytdlp
+
+    - name: Install or upgrade yt-dlp in venv
+      ansible.builtin.command:
+        argv:
+          - "{{ tms_ytdlp_python_path }}"
+          - -m
+          - pip
+          - install
+          - --upgrade
+          - --no-cache-dir
+          - yt-dlp
+      become_user: "{{ tms_user }}"
+      register: ytdlp_pip_install
+      changed_when: "'Requirement already satisfied' not in ytdlp_pip_install.stdout"
+      tags:
+        - packages
+        - ytdlp
 
     - name: Ensure TMS directories exist
       ansible.builtin.file:

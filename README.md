@@ -58,8 +58,8 @@ Remote installation uses Ansible from your workstation and targets an Arch Linux
 - **SSH + sudo** на целевом сервере. SSH + sudo on the target host.
 - **yay** или **paru** на целевом Arch Linux сервере: нужен для установки Prowlarr из AUR.
 
-Ansible устанавливает runtime-зависимости на сервер: `ffmpeg`, `yt-dlp`, `aria2`, `qbittorrent-nox`, Prowlarr из AUR и, если включено, `minidlna`.  
-Ansible installs runtime dependencies on the server: `ffmpeg`, `yt-dlp`, `aria2`, `qbittorrent-nox`, Prowlarr from AUR, and optionally `minidlna`.
+Ansible устанавливает runtime-зависимости на сервер: `ffmpeg`, `aria2`, `qbittorrent-nox`, Python/pip/virtualenv для отдельного venv с `yt-dlp`, Prowlarr из AUR и, если включено, `minidlna`.  
+Ansible installs runtime dependencies on the server: `ffmpeg`, `aria2`, `qbittorrent-nox`, Python/pip/virtualenv for a dedicated `yt-dlp` venv, Prowlarr from AUR, and optionally `minidlna`.
 
 На macOS локальные зависимости обычно ставятся так:
 
@@ -174,11 +174,11 @@ make test-remote
 
 ### Обновление yt-dlp / Keeping yt-dlp up to date
 
-Приложение само обновляет yt-dlp при старте и затем по расписанию (по умолчанию раз в 3 часа). Отключить или изменить интервал можно в `.env` — см. [`.env.example`](.env.example).  
-The application updates yt-dlp on start and then on a schedule (default: every 3 hours). To disable or change the interval, use `.env` — see [`.env.example`](.env.example).
+Приложение само обновляет yt-dlp при старте и затем по расписанию (по умолчанию раз в 3 часа). В Ansible-установке `yt-dlp` живет в отдельном Python venv и обновляется через `python -m pip install --upgrade --no-cache-dir yt-dlp`, поэтому обновление не зависит от задержек пакета ОС. Отключить или изменить режим/интервал можно в `.env` — см. [`.env.example`](.env.example).  
+The application updates yt-dlp on start and then on a schedule (default: every 3 hours). In Ansible installs, `yt-dlp` lives in a dedicated Python venv and is updated via `python -m pip install --upgrade --no-cache-dir yt-dlp`, so updates do not depend on OS package lag. To disable or change the mode/interval, use `.env` — see [`.env.example`](.env.example).
 
-Рекомендуется ставить yt-dlp с [релизов](https://github.com/yt-dlp/yt-dlp/releases) или через `pip install yt-dlp` — версии из репозитория ОС часто не поддерживают самообновление.  
-Prefer installing yt-dlp from [releases](https://github.com/yt-dlp/yt-dlp/releases) or via `pip install yt-dlp`; OS package versions often do not support self-update.
+Для ручной установки используйте `YTDLP_UPDATE_MODE=pip` с venv/pip-установкой или `YTDLP_UPDATE_MODE=self` для standalone binary, который поддерживает `yt-dlp -U`. Версии из репозитория ОС часто не поддерживают самообновление и могут отставать.  
+For manual installs, use `YTDLP_UPDATE_MODE=pip` with a venv/pip install or `YTDLP_UPDATE_MODE=self` for a standalone binary that supports `yt-dlp -U`. OS package versions often do not support self-update and can lag behind.
 
 ---
 

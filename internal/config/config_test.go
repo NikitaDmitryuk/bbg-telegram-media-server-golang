@@ -461,6 +461,20 @@ func TestConfigEnvironmentVariableParsing(t *testing.T) {
 			checkFn:  func(c *Config) bool { return c.YtdlpPath == "/usr/local/bin/yt-dlp" },
 		},
 		{
+			name:     "YTDLP_UPDATE_MODE pip",
+			envVar:   "YTDLP_UPDATE_MODE",
+			envValue: "pip",
+			checkFn:  func(c *Config) bool { return c.YtdlpUpdateMode == "pip" },
+		},
+		{
+			name:     "YTDLP_PYTHON_PATH custom path",
+			envVar:   "YTDLP_PYTHON_PATH",
+			envValue: "/var/lib/telegram-media-server/yt-dlp-venv/bin/python",
+			checkFn: func(c *Config) bool {
+				return c.YtdlpPythonPath == "/var/lib/telegram-media-server/yt-dlp-venv/bin/python"
+			},
+		},
+		{
 			name:     "YTDLP_UPDATE_ON_START true",
 			envVar:   "YTDLP_UPDATE_ON_START",
 			envValue: "true",

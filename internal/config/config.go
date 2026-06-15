@@ -22,6 +22,8 @@ const (
 	DefaultProgressUpdateInterval       = 3 * time.Second
 	DefaultVideoMaxHeight               = 0             // Default: no max height limit (0 = disabled)
 	DefaultYtdlpUpdateInterval          = 3 * time.Hour // Periodic yt-dlp update interval; 0 = disabled
+	DefaultYtdlpUpdateMode              = "self"
+	DefaultYtdlpPythonPath              = "python3"
 	DefaultTMSAPIListen                 = "127.0.0.1:8080"
 )
 
@@ -46,6 +48,8 @@ func NewConfig() (*Config, error) {
 		TMSWebhookToken:        getEnv("TMS_WEBHOOK_TOKEN", ""),
 		TMSWebhookFormat:       getEnv("TMS_WEBHOOK_FORMAT", ""),
 		YtdlpPath:              getEnv("YTDLP_PATH", "/usr/bin/yt-dlp"),
+		YtdlpUpdateMode:        getEnv("YTDLP_UPDATE_MODE", DefaultYtdlpUpdateMode),
+		YtdlpPythonPath:        getEnv("YTDLP_PYTHON_PATH", DefaultYtdlpPythonPath),
 		YtdlpUpdateOnStart:     getEnvBool("YTDLP_UPDATE_ON_START", true),
 		YtdlpUpdateInterval:    getEnvDuration("YTDLP_UPDATE_INTERVAL", DefaultYtdlpUpdateInterval),
 		QBittorrentURL:         getEnv("QBITTORRENT_URL", ""),
@@ -160,7 +164,9 @@ type Config struct {
 	TMSWebhookToken string // optional; sent as Authorization: Bearer <token> when calling TMS_WEBHOOK_URL (e.g. for OpenClaw hooks)
 	// TMSWebhookFormat: json|tms (default), openclaw_wake, openclaw_agent. Empty = auto from URL (/hooks/wake, /hooks/agent).
 	TMSWebhookFormat       string
-	YtdlpPath              string // Path to yt-dlp binary; use standalone from GitHub for auto-update via -U (pacman/pip builds refuse -U)
+	YtdlpPath              string // Path to yt-dlp binary.
+	YtdlpUpdateMode        string // self: yt-dlp -U; pip: python -m pip install --upgrade yt-dlp; off: disabled
+	YtdlpPythonPath        string // Python executable used when YtdlpUpdateMode is pip.
 	YtdlpUpdateOnStart     bool
 	YtdlpUpdateInterval    time.Duration
 	QBittorrentURL         string // When set, torrents are handled by qBittorrent Web API instead of aria2 (e.g. http://localhost:8080)

@@ -291,16 +291,16 @@ func downloadTorrentFile(ctx context.Context, fileURL, moviePath string) (string
 
 func RunUpdatersOnStart(ctx context.Context, cfg *config.Config) {
 	if cfg.YtdlpUpdateOnStart {
-		go newYtdlpUpdater(cfg.YtdlpPath).RunUpdate(ctx)
+		go newYtdlpUpdater(cfg).RunUpdate(ctx)
 	}
 }
 
 func StartPeriodicUpdaters(ctx context.Context, cfg *config.Config) {
 	if cfg.YtdlpUpdateInterval > 0 {
-		go downloader.StartPeriodicUpdater(ctx, cfg.YtdlpUpdateInterval, newYtdlpUpdater(cfg.YtdlpPath))
+		go downloader.StartPeriodicUpdater(ctx, cfg.YtdlpUpdateInterval, newYtdlpUpdater(cfg))
 	}
 }
 
-func newYtdlpUpdater(binaryPath string) downloader.Updater {
-	return ytdlp.NewUpdater(binaryPath)
+func newYtdlpUpdater(cfg *config.Config) downloader.Updater {
+	return ytdlp.NewUpdater(cfg)
 }

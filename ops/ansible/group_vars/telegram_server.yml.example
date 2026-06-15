@@ -15,7 +15,10 @@ tms_lang: ru
 tms_log_level: info
 tms_api_enabled: true
 tms_api_listen: 127.0.0.1:8080
-tms_ytdlp_path: /usr/bin/yt-dlp
+tms_ytdlp_venv_dir: "{{ tms_home }}/yt-dlp-venv"
+tms_ytdlp_path: "{{ tms_ytdlp_venv_dir }}/bin/yt-dlp"
+tms_ytdlp_update_mode: pip
+tms_ytdlp_python_path: "{{ tms_ytdlp_venv_dir }}/bin/python"
 tms_ytdlp_update_on_start: true
 tms_ytdlp_update_interval: 3h
 tms_torrent_fallback_to_aria2: false
