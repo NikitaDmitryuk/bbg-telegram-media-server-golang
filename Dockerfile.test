@@ -1,5 +1,5 @@
 # Test Dockerfile that includes Go SDK and all dependencies
-FROM golang:1.26
+FROM golang:1.27
 
 # Install runtime dependencies
 RUN apt-get update && \
