@@ -313,8 +313,18 @@ docker-test-build:
 
 
 # Utility commands
+.PHONY: agent-context-test
+agent-context-test:
+	@echo "Running agent context validator tests..."
+	python3 -m unittest scripts/test_validate_agent_context.py
+
+.PHONY: agent-context-check
+agent-context-check: agent-context-test
+	@echo "Validating agent-maintained repository context..."
+	python3 scripts/validate_agent_context.py
+
 .PHONY: check
-check: lint vet test-unit
+check: agent-context-check lint vet test-unit
 	@echo "All checks passed!"
 
 .PHONY: pre-commit
@@ -425,7 +435,9 @@ help:
 	@echo "  env-update-local - Merge new .env.example params into local .env"
 	@echo ""
 	@echo "Utility:"
-	@echo "  check          - Run all checks (lint + vet + test-unit)"
+	@echo "  agent-context-test - Run agent context validator unit tests"
+	@echo "  agent-context-check - Test and validate agent-maintained repository context"
+	@echo "  check          - Run all checks (agent context + lint + vet + test-unit)"
 	@echo "  pre-commit     - Run pre-commit checks (format + check)"
 	@echo "  pre-commit-install - Install pre-commit hooks"
 	@echo "  pre-commit-run - Run pre-commit on all files"

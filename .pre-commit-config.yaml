@@ -17,6 +17,14 @@ repos:
   # Go specific hooks
   - repo: local
     hooks:
+      # Agent-maintained repository context
+      - id: agent-context
+        name: Agent Context
+        entry: make agent-context-check
+        language: system
+        files: '^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|\.agents/|scripts/(validate_agent_context|test_validate_agent_context)\.py|Makefile|\.pre-commit-config\.yaml|\.github/workflows/agent-context\.yml)'
+        pass_filenames: false
+
       # Go linting (read-only check)
       - id: go-lint
         name: Go Lint
