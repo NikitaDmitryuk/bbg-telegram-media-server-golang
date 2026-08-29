@@ -16,6 +16,8 @@ Load only the topics needed for the current task:
 - [Verification](verification.md): supported Make targets and CI expectations.
 - [yt-dlp runtime integration](ytdlp.md): cached metadata, retries, managed cookie
   lifecycle with anonymous fallback, sanitized diagnostics, and execution coordination.
+- [qBittorrent lifecycle](qbittorrent.md): authenticated API recovery, indefinite
+  stall handling, persistent warning deduplication, and restart monitoring.
 
 Architecture decisions are under [decisions](../decisions/). Multi-step task state
 is under [plans](../plans/). Source code, tests, configuration, and Git history

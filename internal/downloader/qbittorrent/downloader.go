@@ -19,11 +19,13 @@ import (
 )
 
 const (
-	pollInterval       = 3 * time.Second
-	delayAfterAdd      = 500 * time.Millisecond
-	progressPercentMax = 100
-	stopTimeout        = 15 * time.Second
-	deleteTimeout      = 10 * time.Second
+	pollInterval        = 3 * time.Second
+	delayAfterAdd       = 500 * time.Millisecond
+	progressPercentMax  = 100
+	stopTimeout         = 15 * time.Second
+	deleteTimeout       = 10 * time.Second
+	controlRetryInitial = 2 * time.Second
+	controlRetryMax     = time.Minute
 )
 
 // episodesChanCapacity returns the buffer size for incremental episode notifications.
@@ -210,6 +212,71 @@ func (d *QBittorrentDownloader) StoppedManually() bool {
 	return d.stoppedManually
 }
 
+func (*QBittorrentDownloader) AllowsIndefiniteStall() bool { return true }
+
+func retryDelay(attempt int) time.Duration {
+	delay := controlRetryInitial
+	for i := 0; i < attempt && delay < controlRetryMax; i++ {
+		delay *= 2
+	}
+	if delay > controlRetryMax {
+		delay = controlRetryMax
+	}
+	// Small bounded jitter prevents several resumed jobs from retrying in lockstep.
+	jitterRange := delay / 5
+	if jitterRange == 0 {
+		return delay
+	}
+	jitter := time.Duration(time.Now().UnixNano()%int64(2*jitterRange)) - jitterRange
+	return delay + jitter
+}
+
+func retryControlCall(ctx context.Context, operation string, call func() error) error {
+	return retryControlCallWithBackoff(ctx, operation, call, retryDelay)
+}
+
+func retryControlCallWithBackoff(
+	ctx context.Context,
+	operation string,
+	call func() error,
+	nextDelay func(int) time.Duration,
+) error {
+	for attempt := 0; ; attempt++ {
+		err := call()
+		if err == nil {
+			return nil
+		}
+		delay := nextDelay(attempt)
+		if logutils.Log != nil {
+			logutils.Log.WithError(err).WithFields(map[string]any{
+				"operation": operation,
+				"retry_in":  delay,
+			}).Warn("qBittorrent control request failed; retrying")
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (d *QBittorrentDownloader) torrentsInfoResilient(
+	ctx context.Context,
+	hash, sortBy string,
+	reverse bool,
+) ([]TorrentInfo, error) {
+	var info []TorrentInfo
+	err := retryControlCall(ctx, "torrents/info", func() error {
+		var err error
+		info, err = d.client.TorrentsInfo(ctx, hash, sortBy, reverse)
+		return err
+	})
+	return info, err
+}
+
 func (d *QBittorrentDownloader) setHash(h string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -277,24 +344,25 @@ func (d *QBittorrentDownloader) run(
 	}
 	defer close(progressChan)
 
-	if err := d.client.Login(ctx); err != nil {
-		errChan <- fmt.Errorf("qBittorrent login: %w", err)
+	if err := retryControlCall(ctx, "login", func() error { return d.client.Login(ctx) }); err != nil {
+		errChan <- err
 		return
 	}
 
 	var our *TorrentInfo
 	if d.resumeHash != "" {
 		// Resume: skip add, verify torrent still exists in qBittorrent
-		info, err := d.client.TorrentsInfo(ctx, d.resumeHash, "", false)
+		info, err := d.torrentsInfoResilient(ctx, d.resumeHash, "", false)
 		if err != nil {
-			errChan <- fmt.Errorf("qBittorrent resume torrents/info: %w", err)
+			errChan <- err
 			return
 		}
 		if len(info) == 0 {
-			errChan <- fmt.Errorf("qBittorrent: resumed torrent not found (hash=%s)", d.resumeHash)
-			return
+			our = &TorrentInfo{Hash: d.resumeHash}
+			logutils.Log.Warn("Resumed torrent is absent in qBittorrent; waiting for it to reappear")
+		} else {
+			our = &info[0]
 		}
-		our = &info[0]
 		d.setHash(our.Hash)
 	} else {
 		savepath := d.downloadDir
@@ -305,7 +373,7 @@ func (d *QBittorrentDownloader) run(
 		}
 		if d.magnetURI != "" {
 			if err := d.client.AddTorrentFromURLs(ctx, d.magnetURI, savepath, addOpts); err != nil {
-				errChan <- fmt.Errorf("qBittorrent add magnet: %w", err)
+				errChan <- fmt.Errorf("%w: qBittorrent add magnet: %w", downloader.ErrAmbiguousControlPlane, err)
 				return
 			}
 		} else {
@@ -316,14 +384,14 @@ func (d *QBittorrentDownloader) run(
 				return
 			}
 			if err := d.client.AddTorrentFromFile(ctx, d.torrentFileName, body, savepath, addOpts); err != nil {
-				errChan <- fmt.Errorf("qBittorrent add file: %w", err)
+				errChan <- fmt.Errorf("%w: qBittorrent add file: %w", downloader.ErrAmbiguousControlPlane, err)
 				return
 			}
 		}
 
 		// Find our torrent: last added (most recent added_on).
 		time.Sleep(delayAfterAdd)
-		list, err := d.client.TorrentsInfo(ctx, "", "added_on", true)
+		list, err := d.torrentsInfoResilient(ctx, "", "added_on", true)
 		if err != nil {
 			errChan <- fmt.Errorf("qBittorrent list after add: %w", err)
 			return
@@ -383,6 +451,8 @@ func (d *QBittorrentDownloader) run(
 	defer ticker.Stop()
 	var lastProgress float64
 	lastCompletedEpisodes := d.initialCompletedEpisodes
+	missingLogged := false
+	attentionState := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -394,20 +464,31 @@ func (d *QBittorrentDownloader) run(
 			return
 		case <-ticker.C:
 			// Refresh torrent info
-			info, err := d.client.TorrentsInfo(ctx, our.Hash, "", false)
+			info, err := d.torrentsInfoResilient(ctx, our.Hash, "", false)
 			if err != nil {
-				errChan <- fmt.Errorf("qBittorrent torrents/info: %w", err)
+				errChan <- err
 				return
 			}
 			if len(info) == 0 {
 				if d.StoppedManually() {
 					errChan <- downloader.ErrStoppedByUser
-				} else {
-					errChan <- fmt.Errorf("qBittorrent: torrent no longer in list")
+				} else if !missingLogged {
+					logutils.Log.Warn("Torrent is absent in qBittorrent; keeping the download and waiting")
+					missingLogged = true
 				}
-				return
+				continue
 			}
+			missingLogged = false
 			t := info[0]
+			state := strings.ToLower(strings.TrimSpace(t.State))
+			if state == "error" || state == "missingfiles" {
+				if attentionState != state {
+					logutils.Log.WithField("state", state).Warn("Torrent requires attention; keeping the download active")
+					attentionState = state
+				}
+				continue
+			}
+			attentionState = ""
 			logutils.Log.WithFields(map[string]any{
 				"progress":    t.Progress,
 				"size":        t.Size,

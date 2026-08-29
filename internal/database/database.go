@@ -62,6 +62,13 @@ type Database interface {
 	AuthStore
 }
 
+// TorrentStallStore is an optional persistence capability used by the download
+// manager. Keeping it separate avoids widening lightweight test and API stores.
+type TorrentStallStore interface {
+	TorrentStallNotified(ctx context.Context, movieID uint) (bool, error)
+	SetTorrentStallNotified(ctx context.Context, movieID uint, notified bool) error
+}
+
 func NewDatabase(config *tmsconfig.Config) (Database, error) {
 	database := NewSQLiteDatabase()
 	if err := database.Init(config); err != nil {

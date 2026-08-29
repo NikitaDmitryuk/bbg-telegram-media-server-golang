@@ -19,6 +19,7 @@
         "downloaded_list": "ID:{{.ID}} {{.Sticker}}[{{.Progress}}] {{.Episodes}}{{.SizeGB}}\n{{.Name}}\n",
         "first_episode_ready": "▶️ First episode of «{{.Title}}» is ready to watch.",
         "video_not_supported": "⚠️ Video «{{.Title}}» is not supported by your TV (codec/H.264 level). Download cancelled.",
+        "torrent_stalled": "⚠️ Torrent «{{.Title}}» has made no progress for a long time. It will keep waiting for metadata or peers.",
         "unit_gb": "GB",
         "disk_space_info": "Available disk space: {{.AvailableSpaceGB}} GB",
         "video_successfully_downloaded": "✅ Video successfully downloaded: {{.Title}}",

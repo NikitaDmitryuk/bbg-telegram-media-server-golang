@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -16,12 +17,38 @@ import (
 
 const apiPrefix = "/api/v2"
 
+type HTTPStatusError struct {
+	Operation string
+	Status    int
+}
+
 // Client talks to qBittorrent Web API (v2).
 type Client struct {
 	baseURL    string
 	username   string
 	password   string
 	httpClient *http.Client
+}
+
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("qBittorrent: %s failed status=%d", e.Operation, e.Status)
+}
+
+func isAuthenticationStatus(err error) bool {
+	var statusErr *HTTPStatusError
+	return errors.As(err, &statusErr) &&
+		(statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden)
+}
+
+func (c *Client) retryAfterAuthentication(ctx context.Context, call func() error) error {
+	err := call()
+	if !isAuthenticationStatus(err) {
+		return err
+	}
+	if loginErr := c.Login(ctx); loginErr != nil {
+		return fmt.Errorf("qBittorrent reauthentication: %w", loginErr)
+	}
+	return call()
 }
 
 // NewClient builds a client. baseURL is the Web UI root, e.g. "http://localhost:8080".
@@ -75,7 +102,7 @@ func (c *Client) Login(ctx context.Context) error {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("qBittorrent: login failed status=%d body=%s", resp.StatusCode, string(body))
+		return &HTTPStatusError{Operation: "login", Status: resp.StatusCode}
 	}
 	// qBittorrent returns 200 OK with body "Fails." when credentials are wrong (no SID cookie is set).
 	if strings.TrimSpace(string(body)) == "Fails." {
@@ -100,7 +127,7 @@ func (c *Client) AppVersion(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("qBittorrent: app/version failed status=%d body=%s", resp.StatusCode, string(body))
+		return "", &HTTPStatusError{Operation: "app/version", Status: resp.StatusCode}
 	}
 	return strings.TrimSpace(string(body)), nil
 }
@@ -125,6 +152,12 @@ type AddTorrentOptions struct {
 
 // AddTorrentFromURLs adds a torrent from magnet or .torrent URL. savepath is the download directory.
 func (c *Client) AddTorrentFromURLs(ctx context.Context, urls, savepath string, opts *AddTorrentOptions) error {
+	return c.retryAfterAuthentication(ctx, func() error {
+		return c.addTorrentFromURLs(ctx, urls, savepath, opts)
+	})
+}
+
+func (c *Client) addTorrentFromURLs(ctx context.Context, urls, savepath string, opts *AddTorrentOptions) error {
 	u := c.baseURL + apiPrefix + "/torrents/add"
 	form := url.Values{}
 	form.Set("urls", urls)
@@ -150,14 +183,25 @@ func (c *Client) AddTorrentFromURLs(ctx context.Context, urls, savepath string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("qBittorrent: add urls failed status=%d body=%s", resp.StatusCode, string(body))
+		return &HTTPStatusError{Operation: "add urls", Status: resp.StatusCode}
 	}
 	return nil
 }
 
 // AddTorrentFromFile uploads a .torrent file. savepath is the download directory.
 func (c *Client) AddTorrentFromFile(
+	ctx context.Context,
+	filename string,
+	torrentBody []byte,
+	savepath string,
+	opts *AddTorrentOptions,
+) error {
+	return c.retryAfterAuthentication(ctx, func() error {
+		return c.addTorrentFromFile(ctx, filename, torrentBody, savepath, opts)
+	})
+}
+
+func (c *Client) addTorrentFromFile(
 	ctx context.Context,
 	filename string,
 	torrentBody []byte,
@@ -199,8 +243,7 @@ func (c *Client) AddTorrentFromFile(
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("qBittorrent: add file failed status=%d body=%s", resp.StatusCode, string(body))
+		return &HTTPStatusError{Operation: "add file", Status: resp.StatusCode}
 	}
 	return nil
 }
@@ -223,6 +266,17 @@ type TorrentInfo struct {
 
 // TorrentsInfo returns torrent list. sortOrder: "asc" or "desc". sortBy: e.g. "added_on".
 func (c *Client) TorrentsInfo(ctx context.Context, hashes, sort string, reverse bool) ([]TorrentInfo, error) {
+	list, err := c.torrentsInfo(ctx, hashes, sort, reverse)
+	if !isAuthenticationStatus(err) {
+		return list, err
+	}
+	if loginErr := c.Login(ctx); loginErr != nil {
+		return nil, fmt.Errorf("qBittorrent reauthentication: %w", loginErr)
+	}
+	return c.torrentsInfo(ctx, hashes, sort, reverse)
+}
+
+func (c *Client) torrentsInfo(ctx context.Context, hashes, sort string, reverse bool) ([]TorrentInfo, error) {
 	u := c.baseURL + apiPrefix + "/torrents/info"
 	if hashes != "" || sort != "" {
 		params := url.Values{}
@@ -249,8 +303,7 @@ func (c *Client) TorrentsInfo(ctx context.Context, hashes, sort string, reverse 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("qBittorrent: torrents/info failed status=%d body=%s", resp.StatusCode, string(body))
+		return nil, &HTTPStatusError{Operation: "torrents/info", Status: resp.StatusCode}
 	}
 	var list []TorrentInfo
 	if decErr := json.NewDecoder(resp.Body).Decode(&list); decErr != nil {
@@ -270,6 +323,16 @@ type TorrentFileInfo struct {
 
 // TorrentFiles returns the file list for a torrent.
 func (c *Client) TorrentFiles(ctx context.Context, hash string) ([]TorrentFileInfo, error) {
+	var files []TorrentFileInfo
+	err := c.retryAfterAuthentication(ctx, func() error {
+		var err error
+		files, err = c.torrentFiles(ctx, hash)
+		return err
+	})
+	return files, err
+}
+
+func (c *Client) torrentFiles(ctx context.Context, hash string) ([]TorrentFileInfo, error) {
 	u := c.baseURL + apiPrefix + "/torrents/files"
 	params := url.Values{}
 	params.Set("hash", hash)
@@ -286,8 +349,7 @@ func (c *Client) TorrentFiles(ctx context.Context, hash string) ([]TorrentFileIn
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("qBittorrent: torrents/files failed status=%d body=%s", resp.StatusCode, string(body))
+		return nil, &HTTPStatusError{Operation: "torrents/files", Status: resp.StatusCode}
 	}
 	var files []TorrentFileInfo
 	if decErr := json.NewDecoder(resp.Body).Decode(&files); decErr != nil {
@@ -302,6 +364,12 @@ func (c *Client) TorrentFiles(ctx context.Context, hash string) ([]TorrentFileIn
 // SetFilePriority sets download priority for specific files. ids is pipe-separated 0-based indices (e.g. "0|1|3").
 // Priority values: 0=skip, 1=normal, 6=high, 7=maximal.
 func (c *Client) SetFilePriority(ctx context.Context, hash, ids string, priority int) error {
+	return c.retryAfterAuthentication(ctx, func() error {
+		return c.setFilePriority(ctx, hash, ids, priority)
+	})
+}
+
+func (c *Client) setFilePriority(ctx context.Context, hash, ids string, priority int) error {
 	u := c.baseURL + apiPrefix + "/torrents/filePrio"
 	form := url.Values{}
 	form.Set("hash", hash)
@@ -320,14 +388,19 @@ func (c *Client) SetFilePriority(ctx context.Context, hash, ids string, priority
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("qBittorrent: filePrio failed status=%d body=%s", resp.StatusCode, string(body))
+		return &HTTPStatusError{Operation: "filePrio", Status: resp.StatusCode}
 	}
 	return nil
 }
 
 // DeleteTorrent removes the torrent. deleteFiles: if true, deletes downloaded data.
 func (c *Client) DeleteTorrent(ctx context.Context, hash string, deleteFiles bool) error {
+	return c.retryAfterAuthentication(ctx, func() error {
+		return c.deleteTorrent(ctx, hash, deleteFiles)
+	})
+}
+
+func (c *Client) deleteTorrent(ctx context.Context, hash string, deleteFiles bool) error {
 	u := c.baseURL + apiPrefix + "/torrents/delete"
 	form := url.Values{}
 	form.Set("hashes", hash)
@@ -349,8 +422,7 @@ func (c *Client) DeleteTorrent(ctx context.Context, hash string, deleteFiles boo
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("qBittorrent: delete failed status=%d body=%s", resp.StatusCode, string(body))
+		return &HTTPStatusError{Operation: "delete", Status: resp.StatusCode}
 	}
 	return nil
 }

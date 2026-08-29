@@ -342,6 +342,7 @@ func TestConfigDefaults(t *testing.T) {
 			config.DownloadSettings.ProgressUpdateInterval,
 		)
 	}
+	assertDefaultTorrentStallWarning(t, config)
 
 	if config.SecuritySettings.PasswordMinLength != 8 {
 		t.Errorf("Expected default password min length %d, got %d", 8, config.SecuritySettings.PasswordMinLength)
@@ -367,6 +368,13 @@ func TestConfigDefaults(t *testing.T) {
 
 	if config.VideoSettings.QualitySelector != "bv*+ba/b" {
 		t.Errorf("Expected default video quality selector 'bv*+ba/b', got '%s'", config.VideoSettings.QualitySelector)
+	}
+}
+
+func assertDefaultTorrentStallWarning(t *testing.T, cfg *Config) {
+	t.Helper()
+	if cfg.DownloadSettings.TorrentStallWarningAfter != 30*time.Minute {
+		t.Errorf("Expected default torrent stall warning after 30m, got %v", cfg.DownloadSettings.TorrentStallWarningAfter)
 	}
 }
 

@@ -8,14 +8,135 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NikitaDmitryuk/telegram-media-server/internal/database"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/logutils"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/notifier"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/testutils"
 )
 
+type stallTolerantMock struct{ *testutils.MockDownloader }
+
+func (*stallTolerantMock) AllowsIndefiniteStall() bool { return true }
+
+type stallCaptureNotifier struct{ stalled chan uint }
+
+func (*stallCaptureNotifier) OnQueued(uint, string, int, int)  {}
+func (*stallCaptureNotifier) OnStarted(uint, string)           {}
+func (*stallCaptureNotifier) OnFirstEpisodeReady(uint, string) {}
+func (*stallCaptureNotifier) OnVideoNotSupported(uint, string) {}
+func (n *stallCaptureNotifier) OnStalled(movieID uint, _ string) {
+	n.stalled <- movieID
+}
+
+func waitForStall(t *testing.T, ch <-chan uint) uint {
+	t.Helper()
+	select {
+	case movieID := <-ch:
+		return movieID
+	case <-time.After(time.Second):
+		t.Fatal("stall warning was not emitted")
+		return 0
+	}
+}
+
+func assertNoStall(t *testing.T, ch <-chan uint, wait time.Duration) {
+	t.Helper()
+	select {
+	case <-ch:
+		t.Fatal("unexpected duplicate stall warning")
+	case <-time.After(wait):
+	}
+}
+
+func waitForMonitorStop(t *testing.T, ch <-chan error) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("monitor did not stop after cancellation")
+	}
+}
+
 func TestMain(m *testing.M) {
 	logutils.InitLogger("debug")
 	os.Exit(m.Run())
+}
+
+func TestStallTolerantDownloadWarnsOnceAndKeepsRunning(t *testing.T) {
+	cfg := testutils.TestConfig(t.TempDir())
+	cfg.DownloadSettings.DownloadTimeout = 0
+	cfg.DownloadSettings.ProgressUpdateInterval = 5 * time.Millisecond
+	cfg.DownloadSettings.TorrentStallWarningAfter = 20 * time.Millisecond
+	db := testutils.TestDatabase(t)
+	movieID, err := db.AddMovie(context.Background(), "stalled", 0, []string{"video.mkv"}, nil, 1)
+	if err != nil {
+		t.Fatalf("AddMovie: %v", err)
+	}
+	dm := NewDownloadManager(cfg, db)
+
+	progressChan := make(chan float64, 2)
+	errChan := make(chan error, 1)
+	outerErrChan := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	n := &stallCaptureNotifier{stalled: make(chan uint, 2)}
+	job := &downloadJob{
+		downloader:    &stallTolerantMock{MockDownloader: &testutils.MockDownloader{ShouldBlock: true}},
+		progressChan:  progressChan,
+		errChan:       errChan,
+		ctx:           ctx,
+		cancel:        cancel,
+		queueNotifier: n,
+		title:         "stalled",
+	}
+	dm.mu.Lock()
+	dm.jobs[movieID] = job
+	dm.mu.Unlock()
+	dm.semaphore <- struct{}{}
+	go dm.monitorDownload(movieID, job, outerErrChan)
+	progressChan <- 0
+
+	if got := waitForStall(t, n.stalled); got != movieID {
+		t.Fatalf("stalled movie = %d, want %d", got, movieID)
+	}
+	assertNoStall(t, n.stalled, 50*time.Millisecond)
+	stallStore, ok := db.(database.TorrentStallStore)
+	if !ok {
+		t.Fatal("test database does not implement TorrentStallStore")
+	}
+	notified, err := stallStore.TorrentStallNotified(context.Background(), movieID)
+	if err != nil || !notified {
+		t.Fatalf("persisted stall latch = %v, err=%v", notified, err)
+	}
+
+	cancel()
+	waitForMonitorStop(t, outerErrChan)
+
+	// A restarted monitor loads the persisted latch and must stay quiet for the
+	// same stall episode. Real progress resets the latch and starts a new episode.
+	progressChan = make(chan float64, 2)
+	errChan = make(chan error, 1)
+	outerErrChan = make(chan error, 1)
+	ctx, cancel = context.WithCancel(context.Background())
+	job = &downloadJob{
+		downloader:    &stallTolerantMock{MockDownloader: &testutils.MockDownloader{ShouldBlock: true}},
+		progressChan:  progressChan,
+		errChan:       errChan,
+		ctx:           ctx,
+		cancel:        cancel,
+		queueNotifier: n,
+		title:         "stalled",
+	}
+	dm.mu.Lock()
+	dm.jobs[movieID] = job
+	dm.mu.Unlock()
+	dm.semaphore <- struct{}{}
+	go dm.monitorDownload(movieID, job, outerErrChan)
+	progressChan <- 0
+	assertNoStall(t, n.stalled, 50*time.Millisecond)
+	progressChan <- 10
+	waitForStall(t, n.stalled)
+	cancel()
+	waitForMonitorStop(t, outerErrChan)
 }
 
 // helper that builds a DownloadManager with small stagnant-detection windows.

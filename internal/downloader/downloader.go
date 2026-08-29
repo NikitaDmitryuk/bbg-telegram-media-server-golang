@@ -9,6 +9,11 @@ var ErrVideoAuthenticationRequired = errors.New(
 	"video provider authentication is required; configure a valid yt-dlp cookies file",
 )
 
+// ErrAmbiguousControlPlane means a mutating external API request failed without
+// proving whether the remote side applied it. Automatic cleanup must not delete
+// the local record or remote data in this case.
+var ErrAmbiguousControlPlane = errors.New("external download control request has an ambiguous result")
+
 type Downloader interface {
 	GetTitle() (string, error)
 	GetFiles() ([]string, []string, error)
@@ -36,6 +41,14 @@ type QBittorrentHashDownloader interface {
 // so it survives process restart (channel-based persist can be lost between send and DB write).
 type OnHashKnownSetter interface {
 	SetOnHashKnown(cb func(hash string))
+}
+
+// StallTolerantDownloader marks long-lived downloads whose lack of progress is
+// expected and must not be treated as a terminal failure (for example torrents
+// waiting for metadata or peers).
+type StallTolerantDownloader interface {
+	Downloader
+	AllowsIndefiniteStall() bool
 }
 
 // MagnetMetadataSyncSetter: optional; qBittorrent magnet downloads register placeholder paths until

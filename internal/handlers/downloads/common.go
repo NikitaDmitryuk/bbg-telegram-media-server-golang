@@ -130,3 +130,8 @@ func (n telegramNotifier) OnVideoNotSupported(_ uint, title string) {
 	msg := tmslang.Translate("general.video_not_supported", map[string]any{"Title": title})
 	n.app.Bot.SendMessage(n.chatID, msg, nil)
 }
+
+func (n telegramNotifier) OnStalled(_ uint, title string) {
+	msg := tmslang.Translate("general.torrent_stalled", map[string]any{"Title": title})
+	n.app.Bot.SendMessage(n.chatID, msg, nil)
+}

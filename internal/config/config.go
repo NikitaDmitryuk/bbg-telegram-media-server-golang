@@ -20,6 +20,7 @@ const (
 	DefaultPasswordMinLength            = 8
 	DefaultMaxConcurrentDownloads       = 3
 	DefaultProgressUpdateInterval       = 3 * time.Second
+	DefaultTorrentStallWarningAfter     = 30 * time.Minute
 	DefaultVideoMaxHeight               = 0             // Default: no max height limit (0 = disabled)
 	DefaultYtdlpUpdateInterval          = 3 * time.Hour // Periodic yt-dlp update interval; 0 = disabled
 	DefaultYtdlpCookiesCheckInterval    = 24 * time.Hour
@@ -69,6 +70,10 @@ func NewConfig() (*Config, error) {
 			MaxConcurrentDownloads: getEnvInt("MAX_CONCURRENT_DOWNLOADS", DefaultMaxConcurrentDownloads),
 			DownloadTimeout:        getEnvDuration("DOWNLOAD_TIMEOUT", 0),
 			ProgressUpdateInterval: getEnvDuration("PROGRESS_UPDATE_INTERVAL", DefaultProgressUpdateInterval),
+			TorrentStallWarningAfter: getEnvDuration(
+				"TORRENT_STALL_WARNING_AFTER",
+				DefaultTorrentStallWarningAfter,
+			),
 		},
 
 		SecuritySettings: SecurityConfig{
@@ -193,9 +198,10 @@ type Config struct {
 }
 
 type DownloadConfig struct {
-	MaxConcurrentDownloads int
-	DownloadTimeout        time.Duration
-	ProgressUpdateInterval time.Duration
+	MaxConcurrentDownloads   int
+	DownloadTimeout          time.Duration
+	ProgressUpdateInterval   time.Duration
+	TorrentStallWarningAfter time.Duration
 }
 
 type Aria2Config struct {

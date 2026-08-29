@@ -32,6 +32,12 @@ func RunCompletionLoop(
 	}
 	if err != nil {
 		logutils.Log.WithError(err).Error("Download failed")
+		if errors.Is(err, downloader.ErrAmbiguousControlPlane) {
+			logutils.Log.WithField("movie_id", movieID).
+				Warn("Keeping download record after ambiguous external control request")
+			compl.OnFailed(movieID, title, err)
+			return
+		}
 		if deleteErr := filemanager.DeleteMovie(movieID, a.Config.MoviePath, a.DB, a.DownloadManager); deleteErr != nil {
 			logutils.Log.WithError(deleteErr).Error("Failed to delete movie after download failed")
 		}

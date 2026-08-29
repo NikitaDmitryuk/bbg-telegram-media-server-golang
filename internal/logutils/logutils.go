@@ -87,6 +87,7 @@ func (l *Logger) WithField(key string, value any) *Logger {
 	newFields[key] = value
 	return &Logger{
 		level:  l.level,
+		err:    l.err,
 		fields: newFields,
 		ctx:    l.ctx,
 	}
@@ -99,6 +100,7 @@ func (l *Logger) WithFields(fields map[string]any) *Logger {
 	}
 	return &Logger{
 		level:  l.level,
+		err:    l.err,
 		fields: newFields,
 		ctx:    l.ctx,
 	}

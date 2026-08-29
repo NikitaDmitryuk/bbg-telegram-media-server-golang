@@ -95,6 +95,22 @@ func (s *SQLiteDatabase) UpdateDownloadedPercentage(ctx context.Context, movieID
 	})
 }
 
+func (s *SQLiteDatabase) TorrentStallNotified(ctx context.Context, movieID uint) (bool, error) {
+	var notified bool
+	err := s.withRetry(ctx, "TorrentStallNotified", func() error {
+		return s.db.WithContext(ctx).Model(&Movie{}).Where("id = ?", movieID).
+			Pluck("torrent_stall_notified", &notified).Error
+	})
+	return notified, err
+}
+
+func (s *SQLiteDatabase) SetTorrentStallNotified(ctx context.Context, movieID uint, notified bool) error {
+	return s.withRetry(ctx, "SetTorrentStallNotified", func() error {
+		return s.db.WithContext(ctx).Model(&Movie{}).Where("id = ?", movieID).
+			Update("torrent_stall_notified", notified).Error
+	})
+}
+
 func (s *SQLiteDatabase) UpdateEpisodesProgress(ctx context.Context, movieID uint, completedEpisodes int) error {
 	return s.withRetry(ctx, "UpdateEpisodesProgress", func() error {
 		return s.db.WithContext(ctx).Model(&Movie{}).
