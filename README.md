@@ -180,6 +180,16 @@ The application updates yt-dlp on start and then on a schedule (default: every 3
 Для ручной установки используйте `YTDLP_UPDATE_MODE=pip` с venv/pip-установкой или `YTDLP_UPDATE_MODE=self` для standalone binary, который поддерживает `yt-dlp -U`. Версии из репозитория ОС часто не поддерживают самообновление и могут отставать.  
 For manual installs, use `YTDLP_UPDATE_MODE=pip` with a venv/pip install or `YTDLP_UPDATE_MODE=self` for a standalone binary that supports `yt-dlp -U`. OS package versions often do not support self-update and can lag behind.
 
+Дополнительные retry-параметры задаются через `YTDLP_EXTRA_ARGS`; приложение применяет их и к единственному metadata-запросу, и к самой загрузке. Значение разбивается по пробелам, поэтому аргументы со значениями, содержащими пробелы, не поддерживаются.
+
+Для видео, требующих входа или подтверждения возраста, поддерживается `YTDLP_COOKIES_PATH`. Cookies должны быть в Netscape-формате и не должны попадать в Git. Для Ansible укажите абсолютный локальный путь в игнорируемом `ops/ansible/group_vars/telegram_server.yml`:
+
+```yaml
+tms_ytdlp_cookies_src: "{{ lookup('env', 'HOME') }}/.config/telegram-media-server/youtube.cookies.txt"
+```
+
+Ansible проверит файл и скопирует его в `/etc/telegram-media-server/youtube.cookies.txt` с правами `0640`. Экспортируйте cookies из отдельного incognito-сеанса по [официальной инструкции yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies); после экспорта не открывайте этот сеанс снова. Экспорт может содержать cookies других сайтов, поэтому приложение не выполняет его автоматически и не печатает содержимое файла.
+
 ---
 
 ## Конфигурация / Configuration

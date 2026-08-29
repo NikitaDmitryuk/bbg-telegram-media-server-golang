@@ -2,6 +2,7 @@ package ytdlp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,8 @@ import (
 
 const (
 	ytdlpTimeout        = 30 * time.Second
+	metadataAttemptTime = 9 * time.Second
+	metadataAttempts    = 3
 	DefaultQuality      = "best[height<=1080]"
 	secondsPerMinute    = 60
 	gracefulStopTimeout = 5 * time.Second
@@ -35,6 +38,13 @@ const (
 	defaultYtdlpBinary = "/usr/bin/yt-dlp"
 )
 
+var (
+	metadataRetryDelay = func(attempt int) time.Duration {
+		return time.Duration(attempt) * time.Second
+	}
+	diagnosticURLPattern = regexp.MustCompile(`https?://\S+`)
+)
+
 func ytdlpBinary(cfg *tmsconfig.Config) string {
 	if cfg != nil && cfg.YtdlpPath != "" {
 		return cfg.YtdlpPath
@@ -43,79 +53,76 @@ func ytdlpBinary(cfg *tmsconfig.Config) string {
 }
 
 type YTDLPDownloader struct {
-	url             string
-	title           string
-	outputFileName  string
-	cmd             *exec.Cmd
-	cancel          context.CancelFunc
-	stoppedManually bool
-	config          *tmsconfig.Config
+	url              string
+	title            string
+	fileSize         int64
+	vcodec           string
+	outputFileName   string
+	cmd              *exec.Cmd
+	cancel           context.CancelFunc
+	stoppedManually  bool
+	config           *tmsconfig.Config
+	releaseExecution func()
 }
 
 func NewYTDLPDownloader(videoURL string, config *tmsconfig.Config) downloader.Downloader {
-	videoTitle, err := getVideoTitle(videoURL, config)
+	dl, err := NewYTDLPDownloaderContext(context.Background(), videoURL, config)
 	if err != nil {
 		logutils.Log.WithError(err).Error("Failed to retrieve video title, generating fallback title")
-		videoTitle, _ = extractVideoID(videoURL)
-		if videoTitle == "" {
-			videoTitle = "unknown_video"
-		}
+		return newFallbackDownloader(videoURL, config)
 	}
+	return dl
+}
 
-	outputFileName := tmsutils.GenerateFileName(videoTitle)
+// NewYTDLPDownloaderContext probes metadata once and returns permanent provider
+// errors (notably authentication requirements) before a database row is created.
+func NewYTDLPDownloaderContext(ctx context.Context, videoURL string, config *tmsconfig.Config) (downloader.Downloader, error) {
+	metadata, err := probeVideoMetadata(ctx, videoURL, config)
+	if err != nil {
+		if errors.Is(err, downloader.ErrVideoAuthenticationRequired) || isPermanentMetadataError(err.Error()) {
+			return nil, err
+		}
+		logutils.Log.WithError(err).Warn("Video metadata probe exhausted retries, using fallback metadata")
+		return newFallbackDownloader(videoURL, config), nil
+	}
+	title := strings.TrimSpace(metadata.Title)
+	if title == "" {
+		title = fallbackVideoTitle(videoURL)
+	}
 	return &YTDLPDownloader{
 		url:            videoURL,
-		title:          videoTitle,
-		outputFileName: outputFileName,
+		title:          title,
+		fileSize:       metadataFileSize(&metadata),
+		vcodec:         metadataVcodec(&metadata),
+		outputFileName: tmsutils.GenerateFileName(title),
+		config:         config,
+	}, nil
+}
+
+func newFallbackDownloader(videoURL string, config *tmsconfig.Config) downloader.Downloader {
+	title := fallbackVideoTitle(videoURL)
+	return &YTDLPDownloader{
+		url:            videoURL,
+		title:          title,
+		outputFileName: tmsutils.GenerateFileName(title),
 		config:         config,
 	}
 }
 
-func (*YTDLPDownloader) TotalEpisodes() int { return 0 }
-
-// GetEarlyTvCompatibility runs yt-dlp -j --no-download to get format info and returns a preliminary
-// TV compatibility (green/yellow/red) from vcodec so the circle can be shown immediately.
-func (d *YTDLPDownloader) GetEarlyTvCompatibility(ctx context.Context) (string, error) {
-	vcodec, err := d.fetchVcodecFromMetadata(ctx)
-	if err != nil {
-		logutils.Log.WithError(err).WithField("url", d.url).Debug("Early TV compat: failed to get vcodec from yt-dlp")
-		return "", err
+func fallbackVideoTitle(videoURL string) string {
+	title, _ := extractVideoID(videoURL)
+	if title == "" {
+		return "unknown_video"
 	}
-	return tvcompat.CompatFromVcodec(vcodec), nil
+	return title
 }
 
-// fetchVcodecFromMetadata runs yt-dlp -j --no-download and returns the first non-empty vcodec (top-level or from formats).
-func (d *YTDLPDownloader) fetchVcodecFromMetadata(ctx context.Context) (string, error) {
-	args := []string{"-j", "--no-download", "--no-warnings", d.url}
-	if useProxy, _ := shouldUseProxy(d.url, d.config); useProxy && d.config.Proxy != "" {
-		args = append([]string{"--proxy", d.config.Proxy}, args...)
-	}
-	cmd := exec.CommandContext(
-		ctx,
-		ytdlpBinary(d.config),
-		args...) // #nosec G204 -- binary from config, args built from URL and fixed options
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("yt-dlp -j: %w", err)
-	}
-	var info struct {
-		Vcodec  string `json:"vcodec"`
-		Formats []struct {
-			Vcodec string `json:"vcodec"`
-		} `json:"formats"`
-	}
-	if err := json.Unmarshal(out, &info); err != nil {
-		return "", fmt.Errorf("parse yt-dlp json: %w", err)
-	}
-	if info.Vcodec != "" && info.Vcodec != "none" {
-		return info.Vcodec, nil
-	}
-	for _, f := range info.Formats {
-		if f.Vcodec != "" && f.Vcodec != "none" {
-			return f.Vcodec, nil
-		}
-	}
-	return "", nil
+func (*YTDLPDownloader) TotalEpisodes() int { return 0 }
+
+// GetEarlyTvCompatibility uses the metadata cached during downloader creation.
+func (d *YTDLPDownloader) GetEarlyTvCompatibility(ctx context.Context) (string, error) {
+	_ = ctx
+	return tvcompat.CompatFromVcodec(d.vcodec), nil
 }
 
 func (d *YTDLPDownloader) StartDownload(
@@ -145,18 +152,23 @@ func (d *YTDLPDownloader) StartDownload(
 		ytdlpBinary(d.config),
 		cmdArgs...) // #nosec G204 -- binary from config, cmdArgs built from URL and options
 	d.cmd = cmd
+	releaseExecution := acquireYTDLPExecution()
+	d.releaseExecution = releaseExecution
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		d.releaseYTDLPExecution()
 		return nil, nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		d.releaseYTDLPExecution()
 		return nil, nil, nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		d.releaseYTDLPExecution()
 		return nil, nil, nil, fmt.Errorf("failed to start yt-dlp: %w", err)
 	}
 
@@ -205,6 +217,7 @@ func (d *YTDLPDownloader) monitorDownload(
 ) {
 	defer cancel()
 	defer close(progressChan)
+	defer d.releaseYTDLPExecution()
 	errorOutput := make(chan string, 1)
 
 	go func() {
@@ -251,23 +264,35 @@ func (d *YTDLPDownloader) monitorDownload(
 
 	stderrOutput := <-errorOutput
 
-	if processErr != nil {
-		if d.stoppedManually || errors.Is(processErr, context.Canceled) || errors.Is(processErr, context.DeadlineExceeded) {
-			if errors.Is(processErr, context.DeadlineExceeded) {
-				logutils.Log.Info("yt-dlp process timed out")
-			} else {
-				logutils.Log.Info("yt-dlp process stopped manually")
-			}
-			errChan <- nil
-		} else {
-			logutils.Log.WithError(processErr).Errorf("yt-dlp exited with error: %s", stderrOutput)
-			detailedErr := fmt.Errorf("yt-dlp failed (exit code: %w):\n%s", processErr, stderrOutput)
-			errChan <- detailedErr
-		}
-	} else {
-		errChan <- nil
-	}
+	errChan <- d.downloadProcessError(processErr, stderrOutput)
 	close(errChan)
+}
+
+func (d *YTDLPDownloader) downloadProcessError(processErr error, stderrOutput string) error {
+	if processErr == nil {
+		return nil
+	}
+	if d.stoppedManually || errors.Is(processErr, context.Canceled) || errors.Is(processErr, context.DeadlineExceeded) {
+		if errors.Is(processErr, context.DeadlineExceeded) {
+			logutils.Log.Info("yt-dlp process timed out")
+		} else {
+			logutils.Log.Info("yt-dlp process stopped manually")
+		}
+		return nil
+	}
+	diagnostic := sanitizeYTDLPDiagnostic(stderrOutput, d.url, d.config)
+	logutils.Log.WithError(processErr).Errorf("yt-dlp exited with error: %s", diagnostic)
+	if isAuthenticationError(stderrOutput) {
+		return fmt.Errorf("%w", downloader.ErrVideoAuthenticationRequired)
+	}
+	return fmt.Errorf("yt-dlp failed: %s: %w", diagnostic, processErr)
+}
+
+func (d *YTDLPDownloader) releaseYTDLPExecution() {
+	if d.releaseExecution != nil {
+		d.releaseExecution()
+		d.releaseExecution = nil
+	}
 }
 
 func (d *YTDLPDownloader) StopDownload() error {
@@ -424,81 +449,13 @@ func (d *YTDLPDownloader) cleanupTempFiles() error {
 }
 
 func (d *YTDLPDownloader) GetFileSize() (int64, error) {
-	useProxy, err := shouldUseProxy(d.url, d.config)
-	if err != nil {
-		logutils.Log.WithError(err).Warn("Failed to determine proxy usage for file size check")
-		return 0, nil
-	}
-
-	cmdArgs := []string{"--skip-download", "--print-json", d.url}
-	if useProxy {
-		cmdArgs = append([]string{"--proxy", d.config.Proxy}, cmdArgs...)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), ytdlpTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(
-		ctx,
-		ytdlpBinary(d.config),
-		cmdArgs...) // #nosec G204 -- binary from config, cmdArgs built from URL and options
-	output, err := cmd.Output()
-	if err != nil {
-		logutils.Log.WithError(err).Warn("Failed to get video metadata for file size")
-		return 0, nil
-	}
-
-	var info map[string]any
-	if err := json.Unmarshal(output, &info); err != nil {
-		logutils.Log.WithError(err).Warn("Failed to parse video metadata JSON")
-		return 0, nil
-	}
-
-	// Try different filesize fields in order of preference
-	sizeFields := []string{
-		"filesize",        // Exact file size (if known)
-		"filesize_approx", // Approximate file size
-		"duration",        // For fallback calculation (duration * estimated bitrate)
-	}
-
-	for _, field := range sizeFields {
-		if field == "duration" {
-			// Fallback: estimate size based on duration
-			if duration, ok := info["duration"].(float64); ok && duration > 0 {
-				// Estimate ~1MB per minute for standard quality video
-				estimatedSize := int64(duration * 1024 * 1024 / secondsPerMinute)
-				logutils.Log.WithFields(map[string]any{
-					"duration":       duration,
-					"estimated_size": estimatedSize,
-					"url":            d.url,
-				}).Debug("Estimating file size based on duration")
-				return estimatedSize, nil
-			}
-		} else {
-			if size, ok := info[field].(float64); ok && size > 0 {
-				logutils.Log.WithFields(map[string]any{
-					"size_field": field,
-					"size":       int64(size),
-					"url":        d.url,
-				}).Debug("Got file size from video metadata")
-				return int64(size), nil
-			}
-		}
-	}
-
-	// If no size information is available, log the available fields for debugging
-	logutils.Log.WithFields(map[string]any{
-		"available_fields": getMapKeys(info),
-		"url":              d.url,
-	}).Warn("No file size information available in video metadata")
-
-	return 0, nil
+	return d.fileSize, nil
 }
 
 func getMapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	for key := range m {
+		keys = append(keys, key)
 	}
 	return keys
 }
@@ -512,18 +469,29 @@ func (d *YTDLPDownloader) buildYTDLPArgs(outputPath string) []string {
 
 	qualitySelector := prepareQualitySelector(&videoSettings)
 
-	args := []string{
+	args := append(commonYTDLPArgs(d.config),
 		"--newline",
-		"--remote-components", "ejs:github", // Enable remote components for JS challenge solving
 		"-f", qualitySelector,
 		"-o", outputPath,
-		d.url,
-	}
+	)
 
 	args = appendFormatSortArgs(args, &videoSettings)
 	args = appendReencodingArgs(args, &videoSettings)
 	args = appendSubtitleArgs(args, &videoSettings)
+	args = append(args, d.url)
 
+	return args
+}
+
+func commonYTDLPArgs(cfg *tmsconfig.Config) []string {
+	var args []string
+	if cfg != nil && cfg.YtdlpExtraArgs != "" {
+		args = append(args, strings.Fields(cfg.YtdlpExtraArgs)...)
+	}
+	args = append(args, "--remote-components", "ejs:github")
+	if cfg != nil && cfg.YtdlpCookiesPath != "" {
+		args = append(args, "--cookies", cfg.YtdlpCookiesPath)
+	}
 	return args
 }
 
@@ -618,7 +586,7 @@ func appendSubtitleArgs(args []string, videoSettings *tmsconfig.VideoConfig) []s
 }
 
 func shouldUseProxy(rawURL string, cfg *tmsconfig.Config) (bool, error) {
-	if cfg.Proxy == "" {
+	if cfg == nil || cfg.Proxy == "" {
 		return false, nil
 	}
 
@@ -642,32 +610,161 @@ func shouldUseProxy(rawURL string, cfg *tmsconfig.Config) (bool, error) {
 	return false, nil
 }
 
-func getVideoTitle(videoURL string, cfg *tmsconfig.Config) (string, error) {
+type videoMetadata struct {
+	Title          string  `json:"title"`
+	Filesize       float64 `json:"filesize"`
+	FilesizeApprox float64 `json:"filesize_approx"`
+	Duration       float64 `json:"duration"`
+	Vcodec         string  `json:"vcodec"`
+	Formats        []struct {
+		Vcodec string `json:"vcodec"`
+	} `json:"formats"`
+}
+
+func probeVideoMetadata(parent context.Context, videoURL string, cfg *tmsconfig.Config) (videoMetadata, error) {
+	ctx, cancel := context.WithTimeout(parent, ytdlpTimeout)
+	defer cancel()
+
+	var lastErr error
+	for attempt := 1; attempt <= metadataAttempts; attempt++ {
+		metadata, diagnostic, err := probeVideoMetadataOnce(ctx, videoURL, cfg)
+		if err == nil {
+			return metadata, nil
+		}
+		if isAuthenticationError(diagnostic) {
+			return videoMetadata{}, fmt.Errorf("%w", downloader.ErrVideoAuthenticationRequired)
+		}
+		lastErr = fmt.Errorf("metadata probe attempt %d failed: %s: %w", attempt, diagnostic, err)
+		if isPermanentMetadataError(diagnostic) || attempt == metadataAttempts {
+			break
+		}
+		delay := metadataRetryDelay(attempt)
+		select {
+		case <-ctx.Done():
+			return videoMetadata{}, fmt.Errorf("metadata probe timed out: %w", ctx.Err())
+		case <-time.After(delay):
+		}
+	}
+	if ctx.Err() != nil {
+		return videoMetadata{}, fmt.Errorf("metadata probe timed out: %w", ctx.Err())
+	}
+	return videoMetadata{}, lastErr
+}
+
+func probeVideoMetadataOnce(ctx context.Context, videoURL string, cfg *tmsconfig.Config) (videoMetadata, string, error) {
 	useProxy, err := shouldUseProxy(videoURL, cfg)
 	if err != nil {
-		return "", fmt.Errorf("failed to determine proxy usage: %w", err)
+		return videoMetadata{}, "invalid URL or proxy configuration", err
 	}
 
-	args := []string{"--get-title", "--no-playlist"}
-	if useProxy && cfg.Proxy != "" {
+	args := commonYTDLPArgs(cfg)
+	if useProxy && cfg != nil && cfg.Proxy != "" {
 		args = append(args, "--proxy", cfg.Proxy)
 	}
-	args = append(args, videoURL)
+	args = append(args, "--dump-single-json", "--skip-download", "--no-playlist", "--no-warnings", videoURL)
 
-	ctx, cancel := context.WithTimeout(context.Background(), ytdlpTimeout)
+	attemptCtx, cancel := context.WithTimeout(ctx, metadataAttemptTime)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ytdlpBinary(cfg), args...) // #nosec G204 -- binary from config, args built from URL and fixed options
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get video title: %w", err)
+	cmd := exec.CommandContext(attemptCtx, ytdlpBinary(cfg), args...) // #nosec G204 -- configured binary and trusted options
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	releaseExecution := acquireYTDLPExecution()
+	output, runErr := cmd.Output()
+	releaseExecution()
+	diagnostic := sanitizeYTDLPDiagnostic(stderr.String(), videoURL, cfg)
+	if runErr != nil {
+		if attemptCtx.Err() != nil {
+			return videoMetadata{}, "metadata request timed out", attemptCtx.Err()
+		}
+		return videoMetadata{}, diagnostic, runErr
 	}
 
-	title := strings.TrimSpace(string(output))
-	if title == "" {
-		return "Unknown Title", nil
+	var metadata videoMetadata
+	if err := json.Unmarshal(output, &metadata); err != nil {
+		return videoMetadata{}, "invalid metadata JSON", err
 	}
+	return metadata, "", nil
+}
 
-	return title, nil
+func metadataFileSize(metadata *videoMetadata) int64 {
+	if metadata.Filesize > 0 {
+		return int64(metadata.Filesize)
+	}
+	if metadata.FilesizeApprox > 0 {
+		return int64(metadata.FilesizeApprox)
+	}
+	if metadata.Duration > 0 {
+		return int64(metadata.Duration * 1024 * 1024 / secondsPerMinute)
+	}
+	return 0
+}
+
+func metadataVcodec(metadata *videoMetadata) string {
+	if metadata.Vcodec != "" && metadata.Vcodec != "none" {
+		return metadata.Vcodec
+	}
+	for _, format := range metadata.Formats {
+		if format.Vcodec != "" && format.Vcodec != "none" {
+			return format.Vcodec
+		}
+	}
+	return ""
+}
+
+func isAuthenticationError(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "sign in to confirm") ||
+		strings.Contains(lower, "login_required") ||
+		strings.Contains(lower, "authentication is required")
+}
+
+func isPermanentMetadataError(output string) bool {
+	lower := strings.ToLower(output)
+	permanentMarkers := []string{
+		"unsupported url",
+		"video unavailable",
+		"private video",
+		"has been removed",
+		"this video is unavailable",
+		"failed to load cookies",
+		"could not open cookies",
+	}
+	for _, marker := range permanentMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeYTDLPDiagnostic(output, videoURL string, cfg *tmsconfig.Config) string {
+	sanitized := strings.TrimSpace(output)
+	if videoURL != "" {
+		sanitized = strings.ReplaceAll(sanitized, videoURL, "<video-url>")
+	}
+	if cfg != nil && cfg.Proxy != "" {
+		sanitized = strings.ReplaceAll(sanitized, cfg.Proxy, "<proxy>")
+	}
+	if cfg != nil && cfg.YtdlpCookiesPath != "" {
+		sanitized = strings.ReplaceAll(sanitized, cfg.YtdlpCookiesPath, "<cookies-file>")
+	}
+	sanitized = diagnosticURLPattern.ReplaceAllString(sanitized, "<url>")
+	lines := strings.Split(sanitized, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "ERROR:") {
+			sanitized = line
+			break
+		}
+	}
+	const maxDiagnosticLength = 1024
+	if len(sanitized) > maxDiagnosticLength {
+		sanitized = sanitized[:maxDiagnosticLength] + "..."
+	}
+	if sanitized == "" {
+		return "yt-dlp command failed without diagnostic output"
+	}
+	return sanitized
 }
 
 func extractVideoID(rawURL string) (string, error) {

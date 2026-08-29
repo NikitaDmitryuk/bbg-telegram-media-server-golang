@@ -75,6 +75,7 @@
             "not_enough_space": "Not enough space to download the movie."
         },
         "downloads": {
+			"video_authentication_required": "YouTube requires authentication for this video. Configure a valid yt-dlp cookies file and try again.",
             "video_title_error": "Error retrieving video title: {{.Error}}",
             "video_size_error": "Error retrieving video size: {{.Error}}",
             "video_download_error": "Error downloading video: {{.Error}}",

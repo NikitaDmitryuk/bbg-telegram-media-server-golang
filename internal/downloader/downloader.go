@@ -2,6 +2,11 @@ package downloader
 
 import (
 	"context"
+	"errors"
+)
+
+var ErrVideoAuthenticationRequired = errors.New(
+	"video provider authentication is required; configure a valid yt-dlp cookies file",
 )
 
 type Downloader interface {

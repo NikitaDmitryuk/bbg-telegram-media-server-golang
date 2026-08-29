@@ -461,6 +461,20 @@ func TestConfigEnvironmentVariableParsing(t *testing.T) {
 			checkFn:  func(c *Config) bool { return c.YtdlpPath == "/usr/local/bin/yt-dlp" },
 		},
 		{
+			name:     "YTDLP_EXTRA_ARGS",
+			envVar:   "YTDLP_EXTRA_ARGS",
+			envValue: "--retries 10 --extractor-retries 3",
+			checkFn:  func(c *Config) bool { return c.YtdlpExtraArgs == "--retries 10 --extractor-retries 3" },
+		},
+		{
+			name:     "YTDLP_COOKIES_PATH",
+			envVar:   "YTDLP_COOKIES_PATH",
+			envValue: "/etc/telegram-media-server/youtube.cookies.txt",
+			checkFn: func(c *Config) bool {
+				return c.YtdlpCookiesPath == "/etc/telegram-media-server/youtube.cookies.txt"
+			},
+		},
+		{
 			name:     "YTDLP_UPDATE_MODE pip",
 			envVar:   "YTDLP_UPDATE_MODE",
 			envValue: "pip",

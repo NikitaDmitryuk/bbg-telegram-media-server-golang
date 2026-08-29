@@ -48,6 +48,8 @@ func NewConfig() (*Config, error) {
 		TMSWebhookToken:        getEnv("TMS_WEBHOOK_TOKEN", ""),
 		TMSWebhookFormat:       getEnv("TMS_WEBHOOK_FORMAT", ""),
 		YtdlpPath:              getEnv("YTDLP_PATH", "/usr/bin/yt-dlp"),
+		YtdlpExtraArgs:         getEnv("YTDLP_EXTRA_ARGS", ""),
+		YtdlpCookiesPath:       getEnv("YTDLP_COOKIES_PATH", ""),
 		YtdlpUpdateMode:        getEnv("YTDLP_UPDATE_MODE", DefaultYtdlpUpdateMode),
 		YtdlpPythonPath:        getEnv("YTDLP_PYTHON_PATH", DefaultYtdlpPythonPath),
 		YtdlpUpdateOnStart:     getEnvBool("YTDLP_UPDATE_ON_START", true),
@@ -165,6 +167,8 @@ type Config struct {
 	// TMSWebhookFormat: json|tms (default), openclaw_wake, openclaw_agent. Empty = auto from URL (/hooks/wake, /hooks/agent).
 	TMSWebhookFormat       string
 	YtdlpPath              string // Path to yt-dlp binary.
+	YtdlpExtraArgs         string // Whitespace-separated arguments applied to every yt-dlp invocation.
+	YtdlpCookiesPath       string // Optional Netscape-format cookies file used by yt-dlp.
 	YtdlpUpdateMode        string // self: yt-dlp -U; pip: python -m pip install --upgrade yt-dlp; off: disabled
 	YtdlpPythonPath        string // Python executable used when YtdlpUpdateMode is pip.
 	YtdlpUpdateOnStart     bool

@@ -94,6 +94,8 @@
         telegram_proxy_effective: "{{ telegram_proxy | default(tms_local_env_text | regex_findall('(?m)^TELEGRAM_PROXY=(.*)$') | first | default(tms_existing_env_text | regex_findall('(?m)^TELEGRAM_PROXY=(.*)$') | first | default('', true), true), true) }}"
         content_proxy_effective: "{{ content_proxy | default(tms_local_env_text | regex_findall('(?m)^(?:CONTENT_PROXY|PROXY)=(.*)$') | first | default(tms_existing_env_text | regex_findall('(?m)^(?:CONTENT_PROXY|PROXY)=(.*)$') | first | default('', true), true), true) }}"
         content_proxy_domains_effective: "{{ content_proxy_domains | default(tms_local_env_text | regex_findall('(?m)^(?:CONTENT_PROXY_DOMAINS|PROXY_DOMAINS)=(.*)$') | first | default(tms_existing_env_text | regex_findall('(?m)^(?:CONTENT_PROXY_DOMAINS|PROXY_DOMAINS)=(.*)$') | first | default('', true), true), true) }}"
+        ytdlp_extra_args_effective: "{{ tms_ytdlp_extra_args | default(tms_local_env_text | regex_findall('(?m)^YTDLP_EXTRA_ARGS=(.*)$') | first | default(tms_existing_env_text | regex_findall('(?m)^YTDLP_EXTRA_ARGS=(.*)$') | first | default('', true), true), true) }}"
+        ytdlp_cookies_path_effective: "{{ tms_ytdlp_cookies_dest | default(tms_config_dir ~ '/youtube.cookies.txt') if (tms_ytdlp_cookies_src | default('') | length > 0) else (tms_existing_env_text | regex_findall('(?m)^YTDLP_COOKIES_PATH=(.*)$') | first | default('', true)) }}"
         video_compatibility_mode_effective: "{{ video_compatibility_mode | default(tms_local_env_text | regex_findall('(?m)^VIDEO_COMPATIBILITY_MODE=(.*)$') | first | default(tms_existing_env_text | regex_findall('(?m)^VIDEO_COMPATIBILITY_MODE=(.*)$') | first | default(tms_enable_tv_compatibility | ternary('true', 'false'), true), true), true) }}"
       no_log: true
       tags: always
@@ -129,6 +131,50 @@
         that:
           - tms_local_binary.stat.exists
         fail_msg: "Build the remote binary first: make build-remote"
+      tags: always
+
+    - name: Check optional local yt-dlp cookies file
+      ansible.builtin.stat:
+        path: "{{ tms_ytdlp_cookies_src }}"
+      delegate_to: localhost
+      become: false
+      register: tms_local_ytdlp_cookies
+      when: tms_ytdlp_cookies_src | default('') | length > 0
+      no_log: true
+      tags: always
+
+    - name: Require configured yt-dlp cookies file
+      ansible.builtin.assert:
+        that:
+          - tms_local_ytdlp_cookies.stat.exists
+          - tms_local_ytdlp_cookies.stat.isreg
+        fail_msg: "tms_ytdlp_cookies_src must point to a local Netscape-format cookies file"
+      when: tms_ytdlp_cookies_src | default('') | length > 0
+      no_log: true
+      tags: always
+
+    - name: Read yt-dlp cookies format marker
+      ansible.builtin.command:
+        argv:
+          - head
+          - -n
+          - "1"
+          - "{{ tms_ytdlp_cookies_src }}"
+      delegate_to: localhost
+      become: false
+      register: tms_ytdlp_cookies_marker
+      changed_when: false
+      when: tms_ytdlp_cookies_src | default('') | length > 0
+      no_log: true
+      tags: always
+
+    - name: Require Netscape-format yt-dlp cookies
+      ansible.builtin.assert:
+        that:
+          - tms_ytdlp_cookies_marker.stdout in ['# HTTP Cookie File', '# Netscape HTTP Cookie File']
+        fail_msg: "yt-dlp cookies must use Netscape format"
+      when: tms_ytdlp_cookies_src | default('') | length > 0
+      no_log: true
       tags: always
 
   tasks:
@@ -578,6 +624,20 @@
         backup: true
       notify: Restart TMS
       tags: deploy
+
+    - name: Install optional yt-dlp cookies file
+      ansible.builtin.copy:
+        src: "{{ tms_ytdlp_cookies_src }}"
+        dest: "{{ tms_ytdlp_cookies_dest | default(tms_config_dir ~ '/youtube.cookies.txt') }}"
+        owner: root
+        group: "{{ tms_group }}"
+        mode: "0640"
+      notify: Restart TMS
+      when: tms_ytdlp_cookies_src | default('') | length > 0
+      no_log: true
+      tags:
+        - config
+        - ytdlp
 
     - name: Install TMS env file
       ansible.builtin.template:

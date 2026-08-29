@@ -21,6 +21,11 @@ tms_ytdlp_update_mode: pip
 tms_ytdlp_python_path: "{{ tms_ytdlp_venv_dir }}/bin/python"
 tms_ytdlp_update_on_start: true
 tms_ytdlp_update_interval: 3h
+tms_ytdlp_extra_args: ""
+# Optional absolute controller-side path. Keep the cookies file outside Git.
+# Example: "{{ lookup('env', 'HOME') }}/.config/telegram-media-server/youtube.cookies.txt"
+tms_ytdlp_cookies_src: ""
+tms_ytdlp_cookies_dest: "{{ tms_config_dir }}/youtube.cookies.txt"
 tms_torrent_fallback_to_aria2: false
 tms_enable_prowlarr: true
 tms_enable_minidlna: false

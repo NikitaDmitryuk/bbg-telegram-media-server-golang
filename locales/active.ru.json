@@ -75,6 +75,7 @@
             "not_enough_space": "Недостаточно места для загрузки фильма."
         },
         "downloads": {
+			"video_authentication_required": "YouTube требует авторизацию для этого видео. Настройте актуальный cookies-файл для yt-dlp и повторите попытку.",
             "video_title_error": "Ошибка получения названия видео: {{.Error}}",
             "video_size_error": "Ошибка получения размера видео: {{.Error}}",
             "video_download_error": "Ошибка загрузки видео: {{.Error}}",

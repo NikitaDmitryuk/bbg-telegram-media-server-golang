@@ -14,6 +14,10 @@ import (
 
 // sendDownloadStartError sends a user-facing message for download start failure (same message shape as API).
 func sendDownloadStartError(a *app.App, chatID int64, err error, replyMarkup any) {
+	if errors.Is(err, tmsdownloader.ErrVideoAuthenticationRequired) {
+		a.Bot.SendMessage(chatID, tmslang.Translate("error.downloads.video_authentication_required", nil), replyMarkup)
+		return
+	}
 	msg := utils.DownloadErrorMessage(err)
 	if strings.Contains(strings.ToLower(msg), "invalid magnet") {
 		a.Bot.SendMessage(chatID, tmslang.Translate("error.downloads.invalid_magnet_format", nil), replyMarkup)
@@ -88,6 +92,10 @@ func (n telegramNotifier) OnStopped(_ uint, _ string) {
 }
 
 func (n telegramNotifier) OnFailed(_ uint, _ string, err error) {
+	if errors.Is(err, tmsdownloader.ErrVideoAuthenticationRequired) {
+		n.app.Bot.SendMessage(n.chatID, tmslang.Translate("error.downloads.video_authentication_required", nil), nil)
+		return
+	}
 	n.app.Bot.SendMessage(n.chatID, tmslang.Translate("error.downloads.video_download_error", map[string]any{
 		"Error": utils.DownloadErrorMessage(err),
 	}), nil)
