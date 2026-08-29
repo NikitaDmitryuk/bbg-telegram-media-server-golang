@@ -137,49 +137,49 @@ func (d *YTDLPDownloader) StartDownload(
 	ctx, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
 
-	cmdArgs := d.buildYTDLPArgs(outputPath)
-
-	if useProxy {
-		proxy := d.config.Proxy
-		logutils.Log.WithField("proxy", proxy).Infof("Using proxy for URL: %s", d.url)
-		cmdArgs = append([]string{"--proxy", proxy}, cmdArgs...)
-	} else {
-		logutils.Log.Infof("No proxy used for URL: %s", d.url)
-	}
-
-	cmd := exec.CommandContext(
-		ctx,
-		ytdlpBinary(d.config),
-		cmdArgs...) // #nosec G204 -- binary from config, cmdArgs built from URL and options
-	d.cmd = cmd
 	releaseExecution := acquireYTDLPExecution()
 	d.releaseExecution = releaseExecution
-
-	stdout, err := cmd.StdoutPipe()
+	usedCookies := cookiesUsable(d.config)
+	stdout, stderr, err := d.startDownloadAttempt(ctx, outputPath, useProxy, usedCookies)
 	if err != nil {
 		d.releaseYTDLPExecution()
-		return nil, nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		d.releaseYTDLPExecution()
-		return nil, nil, nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		d.releaseYTDLPExecution()
-		return nil, nil, nil, fmt.Errorf("failed to start yt-dlp: %w", err)
+		return nil, nil, nil, err
 	}
 
 	progressChan = make(chan float64)
 	errChan = make(chan error, 1)
 	epCh := make(chan int, 1)
 
-	go d.monitorDownload(ctx, cancel, stdout, stderr, progressChan, errChan)
+	go d.monitorDownload(ctx, cancel, outputPath, useProxy, usedCookies, stdout, stderr, progressChan, errChan)
 	go waitForProbeableFile(ctx, outputPath, epCh)
 
 	return progressChan, errChan, epCh, nil
+}
+
+func (d *YTDLPDownloader) startDownloadAttempt(
+	ctx context.Context,
+	outputPath string,
+	useProxy bool,
+	includeCookies bool,
+) (stdout, stderr io.ReadCloser, err error) {
+	cmdArgs := d.buildYTDLPArgsWithCookies(outputPath, includeCookies)
+	if useProxy {
+		cmdArgs = append([]string{"--proxy", d.config.Proxy}, cmdArgs...)
+	}
+	cmd := exec.CommandContext(ctx, ytdlpBinary(d.config), cmdArgs...) // #nosec G204 -- configured binary and built arguments
+	d.cmd = cmd
+	stdout, err = cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderr, err = cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("failed to start yt-dlp: %w", err)
+	}
+	return stdout, stderr, nil
 }
 
 // waitForProbeableFile sends 1 on epCh when the output file exists and is large enough for ffprobe,
@@ -211,6 +211,9 @@ func waitForProbeableFile(ctx context.Context, outputPath string, epCh chan int)
 func (d *YTDLPDownloader) monitorDownload(
 	ctx context.Context,
 	cancel context.CancelFunc,
+	outputPath string,
+	useProxy bool,
+	usedCookies bool,
 	stdout, stderr io.ReadCloser,
 	progressChan chan float64,
 	errChan chan error,
@@ -218,6 +221,29 @@ func (d *YTDLPDownloader) monitorDownload(
 	defer cancel()
 	defer close(progressChan)
 	defer d.releaseYTDLPExecution()
+	stderrOutput, processErr := d.waitForDownloadAttempt(ctx, stdout, stderr, progressChan)
+	if processErr != nil && usedCookies && (isAuthenticationError(stderrOutput) || isCookieRejectionError(stderrOutput)) &&
+		!d.stoppedManually && ctx.Err() == nil {
+		markCookiesInvalid(d.config)
+		logutils.Log.Warn("yt-dlp cookies were rejected; retrying download anonymously")
+		retryStdout, retryStderr, retryErr := d.startDownloadAttempt(ctx, outputPath, useProxy, false)
+		if retryErr != nil {
+			errChan <- retryErr
+			close(errChan)
+			return
+		}
+		stderrOutput, processErr = d.waitForDownloadAttempt(ctx, retryStdout, retryStderr, progressChan)
+	}
+
+	errChan <- d.downloadProcessError(processErr, stderrOutput)
+	close(errChan)
+}
+
+func (d *YTDLPDownloader) waitForDownloadAttempt(
+	ctx context.Context,
+	stdout, stderr io.ReadCloser,
+	progressChan chan float64,
+) (stderrOutput string, processErr error) {
 	errorOutput := make(chan string, 1)
 
 	go func() {
@@ -249,7 +275,6 @@ func (d *YTDLPDownloader) monitorDownload(
 		waitDone <- d.cmd.Wait()
 	}()
 
-	var processErr error
 	select {
 	case processErr = <-waitDone:
 	case <-ctx.Done():
@@ -262,10 +287,9 @@ func (d *YTDLPDownloader) monitorDownload(
 		processErr = ctx.Err()
 	}
 
-	stderrOutput := <-errorOutput
+	stderrOutput = <-errorOutput
 
-	errChan <- d.downloadProcessError(processErr, stderrOutput)
-	close(errChan)
+	return stderrOutput, processErr
 }
 
 func (d *YTDLPDownloader) downloadProcessError(processErr error, stderrOutput string) error {
@@ -465,11 +489,15 @@ func (d *YTDLPDownloader) StoppedManually() bool {
 }
 
 func (d *YTDLPDownloader) buildYTDLPArgs(outputPath string) []string {
+	return d.buildYTDLPArgsWithCookies(outputPath, cookiesUsable(d.config))
+}
+
+func (d *YTDLPDownloader) buildYTDLPArgsWithCookies(outputPath string, includeCookies bool) []string {
 	videoSettings := d.config.GetVideoSettings()
 
 	qualitySelector := prepareQualitySelector(&videoSettings)
 
-	args := append(commonYTDLPArgs(d.config),
+	args := append(commonYTDLPArgsWithCookies(d.config, includeCookies),
 		"--newline",
 		"-f", qualitySelector,
 		"-o", outputPath,
@@ -483,13 +511,13 @@ func (d *YTDLPDownloader) buildYTDLPArgs(outputPath string) []string {
 	return args
 }
 
-func commonYTDLPArgs(cfg *tmsconfig.Config) []string {
+func commonYTDLPArgsWithCookies(cfg *tmsconfig.Config, includeCookies bool) []string {
 	var args []string
 	if cfg != nil && cfg.YtdlpExtraArgs != "" {
 		args = append(args, strings.Fields(cfg.YtdlpExtraArgs)...)
 	}
 	args = append(args, "--remote-components", "ejs:github")
-	if cfg != nil && cfg.YtdlpCookiesPath != "" {
+	if cfg != nil && includeCookies && cfg.YtdlpCookiesPath != "" {
 		args = append(args, "--cookies", cfg.YtdlpCookiesPath)
 	}
 	return args
@@ -626,10 +654,24 @@ func probeVideoMetadata(parent context.Context, videoURL string, cfg *tmsconfig.
 	defer cancel()
 
 	var lastErr error
+	usedCookies := cookiesUsable(cfg)
 	for attempt := 1; attempt <= metadataAttempts; attempt++ {
-		metadata, diagnostic, err := probeVideoMetadataOnce(ctx, videoURL, cfg)
+		metadata, diagnostic, err := probeVideoMetadataOnce(ctx, videoURL, cfg, usedCookies)
 		if err == nil {
 			return metadata, nil
+		}
+		if usedCookies && (isAuthenticationError(diagnostic) || isCookieRejectionError(diagnostic)) {
+			anonymousMetadata, anonymousDiagnostic, anonymousErr := probeVideoMetadataOnce(ctx, videoURL, cfg, false)
+			if anonymousErr == nil {
+				markCookiesInvalid(cfg)
+				return anonymousMetadata, nil
+			}
+			if isCookieRejectionError(diagnostic) {
+				markCookiesInvalid(cfg)
+			}
+			if isAuthenticationError(anonymousDiagnostic) {
+				return videoMetadata{}, fmt.Errorf("%w", downloader.ErrVideoAuthenticationRequired)
+			}
 		}
 		if isAuthenticationError(diagnostic) {
 			return videoMetadata{}, fmt.Errorf("%w", downloader.ErrVideoAuthenticationRequired)
@@ -651,13 +693,18 @@ func probeVideoMetadata(parent context.Context, videoURL string, cfg *tmsconfig.
 	return videoMetadata{}, lastErr
 }
 
-func probeVideoMetadataOnce(ctx context.Context, videoURL string, cfg *tmsconfig.Config) (videoMetadata, string, error) {
+func probeVideoMetadataOnce(
+	ctx context.Context,
+	videoURL string,
+	cfg *tmsconfig.Config,
+	includeCookies bool,
+) (videoMetadata, string, error) {
 	useProxy, err := shouldUseProxy(videoURL, cfg)
 	if err != nil {
 		return videoMetadata{}, "invalid URL or proxy configuration", err
 	}
 
-	args := commonYTDLPArgs(cfg)
+	args := commonYTDLPArgsWithCookies(cfg, includeCookies)
 	if useProxy && cfg != nil && cfg.Proxy != "" {
 		args = append(args, "--proxy", cfg.Proxy)
 	}

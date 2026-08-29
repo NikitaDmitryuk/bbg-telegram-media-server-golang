@@ -120,6 +120,8 @@ func (*DatabaseStub) GetUserByChatID(_ context.Context, _ int64) (database.User,
 	return database.User{}, nil
 }
 
+func (*DatabaseStub) ListAdminChatIDs(_ context.Context) ([]int64, error) { return nil, nil }
+
 // Init method.
 
 func (*DatabaseStub) Init(_ *tmsconfig.Config) error { return nil }

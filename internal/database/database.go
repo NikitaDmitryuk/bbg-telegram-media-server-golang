@@ -51,6 +51,7 @@ type AuthStore interface {
 	ExtendTemporaryUser(ctx context.Context, chatID int64, newExpiration time.Time) error
 	GenerateTemporaryPassword(ctx context.Context, duration time.Duration) (string, error)
 	GetUserByChatID(ctx context.Context, chatID int64) (User, error)
+	ListAdminChatIDs(ctx context.Context) ([]int64, error)
 }
 
 // Database is the full storage interface. Embed MovieReader, MovieWriter, AuthStore and Init for backward compatibility.

@@ -359,6 +359,8 @@ func (*TestSQLiteDatabase) GenerateTemporaryPassword(_ context.Context, _ time.D
 func (*TestSQLiteDatabase) GetUserByChatID(_ context.Context, _ int64) (database.User, error) {
 	return database.User{}, nil
 }
+
+func (*TestSQLiteDatabase) ListAdminChatIDs(_ context.Context) ([]int64, error) { return nil, nil }
 func (t *TestSQLiteDatabase) MovieExistsId(ctx context.Context, movieID uint) (bool, error) {
 	var count int64
 	if err := t.db.WithContext(ctx).Model(&database.Movie{}).Where("id = ?", movieID).Count(&count).Error; err != nil {

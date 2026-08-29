@@ -475,6 +475,26 @@ func TestConfigEnvironmentVariableParsing(t *testing.T) {
 			},
 		},
 		{
+			name:     "YTDLP_COOKIES_CHECK_INTERVAL parsing",
+			envVar:   "YTDLP_COOKIES_CHECK_INTERVAL",
+			envValue: "24h",
+			checkFn:  func(c *Config) bool { return c.YtdlpCookiesCheckInterval == 24*time.Hour },
+		},
+		{
+			name:     "YTDLP_COOKIES_STATE_PATH",
+			envVar:   "YTDLP_COOKIES_STATE_PATH",
+			envValue: "/var/lib/telegram-media-server/youtube-cookie-state.json",
+			checkFn: func(c *Config) bool {
+				return c.YtdlpCookiesStatePath == "/var/lib/telegram-media-server/youtube-cookie-state.json"
+			},
+		},
+		{
+			name:     "YTDLP_COOKIES_CHECK_INTERVAL zero disables checks",
+			envVar:   "YTDLP_COOKIES_CHECK_INTERVAL",
+			envValue: "0",
+			checkFn:  func(c *Config) bool { return c.YtdlpCookiesCheckInterval == 0 },
+		},
+		{
 			name:     "YTDLP_UPDATE_MODE pip",
 			envVar:   "YTDLP_UPDATE_MODE",
 			envValue: "pip",

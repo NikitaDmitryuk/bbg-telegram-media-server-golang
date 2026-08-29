@@ -4,7 +4,7 @@ status: active
 date: 2026-08-29
 last-verified: 2026-08-29
 agent: codex
-evidence: internal/downloader/video/ytdlp.go, internal/downloader/video/metadata_test.go, internal/downloader/video/execution.go, internal/downloader/video/updater.go, internal/config/config.go, ops/ansible/site.yml
+evidence: internal/downloader/video/ytdlp.go, internal/downloader/video/cookies.go, internal/downloader/video/cookies_test.go, internal/downloader/video/execution.go, internal/downloader/video/updater.go, internal/config/config.go, ops/ansible/site.yml, scripts/ytdlp-cookies-login.sh
 ---
 
 # yt-dlp runtime integration
@@ -18,10 +18,21 @@ evidence: internal/downloader/video/ytdlp.go, internal/downloader/video/metadata
 - `YTDLP_EXTRA_ARGS` and the optional `YTDLP_COOKIES_PATH` apply to metadata and
   download commands. Ansible can copy an external cookies file with restricted
   permissions; cookie contents never belong in Git.
+- Optional managed mode provisions a YouTube-only jar through a temporary Chromium
+  session exposed only over an SSH tunnel. The browser profile is deleted after export.
+  A daily exclusive check refreshes valid cookies and persists lifecycle state outside
+  the jar.
+- Rejected cookies are disabled and both metadata and download receive one anonymous
+  retry. Empty or unprovisioned cookie configuration stays silently anonymous. Each
+  invalid episode produces one persistent, deduplicated notification per active admin;
+  successful renewal resets the latch without a recovery message.
+- Ansible emits an empty `YTDLP_COOKIES_PATH` when neither managed mode nor a
+  controller-provided cookie file is configured. This keeps disabled deployments
+  strictly anonymous instead of inheriting a stale server-side path.
 - A process-wide read/write guard prevents yt-dlp updates from overlapping active
-  metadata probes or downloads. Startup update is synchronous; a busy periodic
-  update is skipped until its next scheduled interval.
+  metadata probes, downloads, or cookie refresh. Startup update is synchronous; a busy
+  periodic update or cookie check is skipped until its next scheduled interval.
 
 See the focused fake-binary coverage in
 [`metadata_test.go`](../../internal/downloader/video/metadata_test.go) and
-[`updater_test.go`](../../internal/downloader/video/updater_test.go).
+[`cookies_test.go`](../../internal/downloader/video/cookies_test.go).

@@ -188,7 +188,19 @@ For manual installs, use `YTDLP_UPDATE_MODE=pip` with a venv/pip install or `YTD
 tms_ytdlp_cookies_src: "{{ lookup('env', 'HOME') }}/.config/telegram-media-server/youtube.cookies.txt"
 ```
 
-Ansible проверит файл и скопирует его в `/etc/telegram-media-server/youtube.cookies.txt` с правами `0640`. Экспортируйте cookies из отдельного incognito-сеанса по [официальной инструкции yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies); после экспорта не открывайте этот сеанс снова. Экспорт может содержать cookies других сайтов, поэтому приложение не выполняет его автоматически и не печатает содержимое файла.
+Ansible проверит файл и скопирует его в `/etc/telegram-media-server/youtube.cookies.txt` с правами `0640`. Экспортируйте cookies из отдельного incognito-сеанса по [официальной инструкции yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies); после экспорта не открывайте этот сеанс снова.
+
+Для server-managed режима вместо локального файла включите только следующую переменную:
+
+```yaml
+tms_ytdlp_managed_cookies: true
+```
+
+После `make install` выполните `make ytdlp-cookies-login`. Команда запускает временный Chromium на сервере, пробрасывает его DevTools только через SSH на `http://127.0.0.1:9222` и показывает удалённую вкладку через screencast. Войдите в отдельный Google-аккаунт, подтвердите вход телефоном, откройте `https://www.youtube.com/robots.txt` и вернитесь в терминал. Экспортёр оставит только `youtube.com` cookies, проверит `:ythistory`, установит jar атомарно и удалит весь браузерный профиль. Пароль, 2FA и профиль не сохраняются.
+
+Приложение проверяет jar раз в сутки (`YTDLP_COOKIES_CHECK_INTERVAL=24h`) и сохраняет обновлённые cookies, полученные от YouTube. После окончательного отзыва сессии cookies отключаются: публичные видео продолжают работать анонимно, а каждый текущий Telegram-администратор получает одно сообщение без повторов. После следующего успешного входа latch молча сбрасывается. Значение интервала `0` отключает фоновую проверку; пустой `YTDLP_COOKIES_PATH` полностью сохраняет старый анонимный режим.
+
+The managed mode uses an SSH-only temporary Chromium session, filters the export to YouTube domains, validates and refreshes the jar daily, and deletes the browser profile after every login. When the session expires, cookies are disabled so public videos continue anonymously, and each Telegram administrator receives one notification for that expiry episode. No password, 2FA secret, browser profile, or cookie content is committed or logged.
 
 ---
 

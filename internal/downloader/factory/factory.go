@@ -301,6 +301,10 @@ func StartPeriodicUpdaters(ctx context.Context, cfg *config.Config) {
 	}
 }
 
+func StartCookieMonitor(ctx context.Context, cfg *config.Config, notify ytdlp.CookieNotifier) {
+	go ytdlp.StartCookieMonitor(ctx, cfg, notify)
+}
+
 func newYtdlpUpdater(cfg *config.Config) downloader.Updater {
 	return ytdlp.NewUpdater(cfg)
 }

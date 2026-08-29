@@ -76,6 +76,7 @@
         },
         "downloads": {
 			"video_authentication_required": "YouTube requires authentication for this video. Configure a valid yt-dlp cookies file and try again.",
+			"youtube_cookies_expired": "YouTube cookies have expired. Public videos will continue to work anonymously; renew cookies with make ytdlp-cookies-login.",
             "video_title_error": "Error retrieving video title: {{.Error}}",
             "video_size_error": "Error retrieving video size: {{.Error}}",
             "video_download_error": "Error downloading video: {{.Error}}",

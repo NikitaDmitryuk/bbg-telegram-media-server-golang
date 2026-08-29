@@ -22,6 +22,7 @@ const (
 	DefaultProgressUpdateInterval       = 3 * time.Second
 	DefaultVideoMaxHeight               = 0             // Default: no max height limit (0 = disabled)
 	DefaultYtdlpUpdateInterval          = 3 * time.Hour // Periodic yt-dlp update interval; 0 = disabled
+	DefaultYtdlpCookiesCheckInterval    = 24 * time.Hour
 	DefaultYtdlpUpdateMode              = "self"
 	DefaultYtdlpPythonPath              = "python3"
 	DefaultTMSAPIListen                 = "127.0.0.1:8080"
@@ -29,27 +30,32 @@ const (
 
 func NewConfig() (*Config, error) {
 	config := &Config{
-		BotToken:               getEnv("BOT_TOKEN", ""),
-		MoviePath:              getEnv("MOVIE_PATH", ""),
-		AdminPassword:          getEnv("ADMIN_PASSWORD", ""),
-		RegularPassword:        getEnv("REGULAR_PASSWORD", ""),
-		Lang:                   getEnv("LANG", "en"),
-		TelegramProxy:          getEnv("TELEGRAM_PROXY", ""),
-		Proxy:                  getEnv("CONTENT_PROXY", getEnv("PROXY", "")),
-		ProxyDomains:           getEnv("CONTENT_PROXY_DOMAINS", getEnv("PROXY_DOMAINS", "")),
-		LogLevel:               getEnv("LOG_LEVEL", "info"),
-		LangPath:               getEnv("LANG_PATH", "/usr/local/share/telegram-media-server/locales"),
-		ProwlarrURL:            getEnv("PROWLARR_URL", ""),
-		ProwlarrAPIKey:         getEnv("PROWLARR_API_KEY", ""),
-		TMSAPIEnabled:          getEnvBool("TMS_API_ENABLED", true),
-		TMSAPIListen:           getEnv("TMS_API_LISTEN", DefaultTMSAPIListen),
-		TMSAPIKey:              getEnv("TMS_API_KEY", ""),
-		TMSWebhookURL:          getEnv("TMS_WEBHOOK_URL", ""),
-		TMSWebhookToken:        getEnv("TMS_WEBHOOK_TOKEN", ""),
-		TMSWebhookFormat:       getEnv("TMS_WEBHOOK_FORMAT", ""),
-		YtdlpPath:              getEnv("YTDLP_PATH", "/usr/bin/yt-dlp"),
-		YtdlpExtraArgs:         getEnv("YTDLP_EXTRA_ARGS", ""),
-		YtdlpCookiesPath:       getEnv("YTDLP_COOKIES_PATH", ""),
+		BotToken:              getEnv("BOT_TOKEN", ""),
+		MoviePath:             getEnv("MOVIE_PATH", ""),
+		AdminPassword:         getEnv("ADMIN_PASSWORD", ""),
+		RegularPassword:       getEnv("REGULAR_PASSWORD", ""),
+		Lang:                  getEnv("LANG", "en"),
+		TelegramProxy:         getEnv("TELEGRAM_PROXY", ""),
+		Proxy:                 getEnv("CONTENT_PROXY", getEnv("PROXY", "")),
+		ProxyDomains:          getEnv("CONTENT_PROXY_DOMAINS", getEnv("PROXY_DOMAINS", "")),
+		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		LangPath:              getEnv("LANG_PATH", "/usr/local/share/telegram-media-server/locales"),
+		ProwlarrURL:           getEnv("PROWLARR_URL", ""),
+		ProwlarrAPIKey:        getEnv("PROWLARR_API_KEY", ""),
+		TMSAPIEnabled:         getEnvBool("TMS_API_ENABLED", true),
+		TMSAPIListen:          getEnv("TMS_API_LISTEN", DefaultTMSAPIListen),
+		TMSAPIKey:             getEnv("TMS_API_KEY", ""),
+		TMSWebhookURL:         getEnv("TMS_WEBHOOK_URL", ""),
+		TMSWebhookToken:       getEnv("TMS_WEBHOOK_TOKEN", ""),
+		TMSWebhookFormat:      getEnv("TMS_WEBHOOK_FORMAT", ""),
+		YtdlpPath:             getEnv("YTDLP_PATH", "/usr/bin/yt-dlp"),
+		YtdlpExtraArgs:        getEnv("YTDLP_EXTRA_ARGS", ""),
+		YtdlpCookiesPath:      getEnv("YTDLP_COOKIES_PATH", ""),
+		YtdlpCookiesStatePath: getEnv("YTDLP_COOKIES_STATE_PATH", ""),
+		YtdlpCookiesCheckInterval: getEnvDuration(
+			"YTDLP_COOKIES_CHECK_INTERVAL",
+			DefaultYtdlpCookiesCheckInterval,
+		),
 		YtdlpUpdateMode:        getEnv("YTDLP_UPDATE_MODE", DefaultYtdlpUpdateMode),
 		YtdlpPythonPath:        getEnv("YTDLP_PYTHON_PATH", DefaultYtdlpPythonPath),
 		YtdlpUpdateOnStart:     getEnvBool("YTDLP_UPDATE_ON_START", true),
@@ -165,18 +171,20 @@ type Config struct {
 	TMSWebhookURL   string // optional; POST on download completion/failure
 	TMSWebhookToken string // optional; sent as Authorization: Bearer <token> when calling TMS_WEBHOOK_URL (e.g. for OpenClaw hooks)
 	// TMSWebhookFormat: json|tms (default), openclaw_wake, openclaw_agent. Empty = auto from URL (/hooks/wake, /hooks/agent).
-	TMSWebhookFormat       string
-	YtdlpPath              string // Path to yt-dlp binary.
-	YtdlpExtraArgs         string // Whitespace-separated arguments applied to every yt-dlp invocation.
-	YtdlpCookiesPath       string // Optional Netscape-format cookies file used by yt-dlp.
-	YtdlpUpdateMode        string // self: yt-dlp -U; pip: python -m pip install --upgrade yt-dlp; off: disabled
-	YtdlpPythonPath        string // Python executable used when YtdlpUpdateMode is pip.
-	YtdlpUpdateOnStart     bool
-	YtdlpUpdateInterval    time.Duration
-	QBittorrentURL         string // When set, torrents are handled by qBittorrent Web API instead of aria2 (e.g. http://localhost:8080)
-	QBittorrentUsername    string
-	QBittorrentPassword    string
-	TorrentFallbackToAria2 bool // If true, qBittorrent setup/start errors can fall back to aria2.
+	TMSWebhookFormat          string
+	YtdlpPath                 string        // Path to yt-dlp binary.
+	YtdlpExtraArgs            string        // Whitespace-separated arguments applied to every yt-dlp invocation.
+	YtdlpCookiesPath          string        // Optional Netscape-format cookies file used by yt-dlp.
+	YtdlpCookiesStatePath     string        // Optional writable lifecycle-state path; defaults next to the cookie file.
+	YtdlpCookiesCheckInterval time.Duration // Periodic cookie validation; 0 disables checks.
+	YtdlpUpdateMode           string        // self: yt-dlp -U; pip: python -m pip install --upgrade yt-dlp; off: disabled
+	YtdlpPythonPath           string        // Python executable used when YtdlpUpdateMode is pip.
+	YtdlpUpdateOnStart        bool
+	YtdlpUpdateInterval       time.Duration
+	QBittorrentURL            string // When set, torrents are handled by qBittorrent Web API instead of aria2 (e.g. http://localhost:8080)
+	QBittorrentUsername       string
+	QBittorrentPassword       string
+	TorrentFallbackToAria2    bool // If true, qBittorrent setup/start errors can fall back to aria2.
 
 	DownloadSettings DownloadConfig
 	SecuritySettings SecurityConfig

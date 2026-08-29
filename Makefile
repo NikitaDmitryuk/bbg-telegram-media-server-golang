@@ -141,6 +141,10 @@ deploy: build-remote
 	fi
 	ansible-playbook -i $(ANSIBLE_INVENTORY) $(ANSIBLE_VAULT_ARGS) ops/ansible/deploy.yml
 
+.PHONY: ytdlp-cookies-login
+ytdlp-cookies-login:
+	REMOTE_SSH=$(REMOTE_SSH) ./scripts/ytdlp-cookies-login.sh
+
 .PHONY: ansible-check
 ansible-check:
 	@if ! command -v ansible-playbook >/dev/null 2>&1; then \
@@ -403,6 +407,7 @@ help:
 	@echo "  build-remote   - Build linux/amd64 binary for Ansible deploy"
 	@echo "  install        - Build and install remote stack with Ansible"
 	@echo "  deploy         - Build and deploy only the TMS binary with Ansible"
+	@echo "  ytdlp-cookies-login - Renew managed YouTube cookies through an SSH-only Chromium session"
 	@echo "  ansible-check  - Run Ansible syntax checks"
 	@echo "  test-remote    - Run post-install Ansible smoke and scenario tests"
 	@echo "  uninstall      - Uninstall system service"

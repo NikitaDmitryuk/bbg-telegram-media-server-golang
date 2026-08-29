@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -eq 0 ]; then
+	exec /usr/bin/runuser -u {{ tms_user | quote }} -- "$0" "$@"
+fi
+
+profile={{ ((tms_ytdlp_managed_cookies_dir | default(tms_home ~ '/youtube-auth')) ~ '/browser-profile') | quote }}
+destination={{ ((tms_ytdlp_managed_cookies_dir | default(tms_home ~ '/youtube-auth')) ~ '/youtube.cookies.txt') | quote }}
+state_file={{ tms_ytdlp_cookies_state_path | default(tms_home ~ '/youtube-cookie-state.json') | quote }}
+
+cleanup() {
+	rm -rf "${profile}"
+}
+
+if [ "${1:-}" = "--cleanup" ]; then
+	cleanup
+	exit 0
+fi
+
+raw=$(mktemp {{ ((tms_ytdlp_managed_cookies_dir | default(tms_home ~ '/youtube-auth')) ~ '/.cookies.raw.XXXXXX') | quote }})
+filtered=$(mktemp {{ ((tms_ytdlp_managed_cookies_dir | default(tms_home ~ '/youtube-auth')) ~ '/.cookies.filtered.XXXXXX') | quote }})
+trap 'rm -f "${raw}" "${filtered}"; cleanup' EXIT HUP INT TERM
+chmod 0600 "${raw}" "${filtered}"
+printf '# Netscape HTTP Cookie File\n' > "${raw}"
+
+{{ tms_ytdlp_path | quote }} --ignore-config \
+  --cookies-from-browser "chromium+basictext:${profile}" \
+  --cookies "${raw}" \
+  --skip-download --quiet --no-warnings \
+  https://www.youtube.com/robots.txt
+
+awk -F '\t' '
+  NR == 1 && ($0 == "# HTTP Cookie File" || $0 == "# Netscape HTTP Cookie File") { print; next }
+  {
+    domain = $1
+    sub(/^#HttpOnly_/, "", domain)
+    sub(/^\./, "", domain)
+    if (tolower(domain) == "youtube.com" || tolower(domain) ~ /\.youtube\.com$/) print
+  }
+' "${raw}" > "${filtered}"
+
+if ! grep -Eq '^# (HTTP|Netscape HTTP) Cookie File$' "${filtered}" || ! grep -Eq '(^|\.)youtube\.com[[:space:]]' "${filtered}"; then
+	echo "Export did not produce a valid YouTube Netscape cookie jar." >&2
+	exit 1
+fi
+
+{{ tms_ytdlp_path | quote }} --ignore-config \
+  --cookies "${filtered}" \
+  --flat-playlist --playlist-items 1 --simulate --quiet --no-warnings \
+  :ythistory
+
+chmod 0400 "${filtered}"
+mv -f "${filtered}" "${destination}"
+rm -f "${state_file}"

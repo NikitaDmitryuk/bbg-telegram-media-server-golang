@@ -1,0 +1,28 @@
+[Unit]
+Description=Temporary Chromium session for Telegram Media Server YouTube login
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ tms_user }}
+Group={{ tms_group }}
+Environment=HOME={{ tms_home }}
+RuntimeMaxSec=20min
+ExecStartPre=/usr/bin/rm -rf {{ tms_ytdlp_managed_cookies_dir | default(tms_home ~ '/youtube-auth') }}/browser-profile
+ExecStart=/usr/bin/xvfb-run -a /usr/bin/chromium \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=* \
+  --user-data-dir={{ tms_ytdlp_managed_cookies_dir | default(tms_home ~ '/youtube-auth') }}/browser-profile \
+  --password-store=basic \
+  --disable-sync \
+  --disable-save-password-bubble \
+  --disable-features=PasswordManagerOnboarding,PasswordLeakDetection \
+  --no-first-run \
+  --no-default-browser-check \
+  https://accounts.google.com/ServiceLogin
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

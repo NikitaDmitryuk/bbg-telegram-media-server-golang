@@ -83,7 +83,10 @@ printf '{"title":"Cached title","filesize":4096,"vcodec":"avc1.64001f"}\n'
 func TestMetadataProbeAuthenticationDoesNotRetry(t *testing.T) {
 	withoutMetadataRetryDelay(t)
 	counterPath := filepath.Join(t.TempDir(), "count")
-	script := fmt.Sprintf("printf '1\\n' > %q\nprintf 'ERROR: Sign in to confirm your age. Use --cookies for authentication.\\n' >&2\nexit 1\n", counterPath)
+	script := fmt.Sprintf(
+		"printf '1\\n' > %q\nprintf 'ERROR: Sign in to confirm your age. Use --cookies for authentication.\\n' >&2\nexit 1\n",
+		counterPath,
+	)
 	cfg := testutils.TestConfig(t.TempDir())
 	cfg.YtdlpPath = writeFakeYTDLP(t, script)
 
@@ -132,7 +135,10 @@ func TestMetadataProbeAppliesCommonArguments(t *testing.T) {
 	cfg := testutils.TestConfig(t.TempDir())
 	cfg.YtdlpPath = writeFakeYTDLP(t, script)
 	cfg.YtdlpExtraArgs = "--retries 7 --extractor-retries 4"
-	cfg.YtdlpCookiesPath = "/safe/youtube.cookies.txt"
+	cfg.YtdlpCookiesPath = filepath.Join(t.TempDir(), "youtube.cookies.txt")
+	if err := os.WriteFile(cfg.YtdlpCookiesPath, []byte("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tvalue\n"), 0o600); err != nil {
+		t.Fatalf("write cookies: %v", err)
+	}
 	cfg.Proxy = "socks5://user:password@proxy.example:1080"
 	cfg.ProxyDomains = "example.com"
 
@@ -181,5 +187,73 @@ func TestSanitizeYTDLPDiagnosticRemovesURLAndProxy(t *testing.T) {
 	got := sanitizeYTDLPDiagnostic("debug\nERROR: failed for "+videoURL+" via "+cfg.Proxy, videoURL, cfg)
 	if strings.Contains(got, videoURL) || strings.Contains(got, cfg.Proxy) || strings.Contains(got, "user:secret") {
 		t.Fatalf("diagnostic leaked sensitive input: %q", got)
+	}
+}
+
+func TestMetadataProbeRetriesAnonymouslyWhenCookiesAreRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake executable requires a Unix shell")
+	}
+	cfg := testutils.TestConfig(t.TempDir())
+	cfg.YtdlpCookiesPath = filepath.Join(t.TempDir(), "youtube.cookies.txt")
+	if err := os.WriteFile(cfg.YtdlpCookiesPath, []byte("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tvalue\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := `
+case " $* " in
+  *" --cookies "*) printf 'ERROR: account cookies are no longer valid\n' >&2; exit 1 ;;
+esac
+printf '{"title":"Anonymous title","filesize":42,"vcodec":"h264"}\n'
+`
+	cfg.YtdlpPath = writeFakeYTDLP(t, script)
+	dl, err := NewYTDLPDownloaderContext(context.Background(), "https://example.com/public", cfg)
+	if err != nil {
+		t.Fatalf("anonymous fallback: %v", err)
+	}
+	if title, _ := dl.GetTitle(); title != "Anonymous title" {
+		t.Fatalf("title=%q", title)
+	}
+	if cookiesUsable(cfg) {
+		t.Fatal("rejected cookies should be disabled after anonymous fallback")
+	}
+}
+
+func TestDownloadRetriesAnonymouslyWhenCookiesAreRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake executable requires a Unix shell")
+	}
+	dir := t.TempDir()
+	cfg := testutils.TestConfig(dir)
+	cfg.YtdlpCookiesPath = filepath.Join(dir, "youtube.cookies.txt")
+	if err := os.WriteFile(cfg.YtdlpCookiesPath, []byte("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tvalue\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "args.log")
+	script := fmt.Sprintf(`
+printf 'attempt\n' >> %q
+case " $* " in
+  *" --cookies "*) printf 'ERROR: account cookies are no longer valid\n' >&2; exit 1 ;;
+esac
+printf '[download] 100%%%%\n'
+`, logPath)
+	cfg.YtdlpPath = writeFakeYTDLP(t, script)
+	dl := &YTDLPDownloader{url: "https://example.com/public", outputFileName: "video.mp4", config: cfg}
+	progress, errorsCh, episodes, err := dl.StartDownload(context.Background())
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	for range progress {
+	}
+	if downloadErr := <-errorsCh; downloadErr != nil {
+		t.Fatalf("download retry: %v", downloadErr)
+	}
+	for range episodes {
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), "attempt"); got != 2 {
+		t.Fatalf("attempts=%d, want 2", got)
 	}
 }
