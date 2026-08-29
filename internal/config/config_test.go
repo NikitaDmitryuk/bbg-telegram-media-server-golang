@@ -342,6 +342,7 @@ func TestConfigDefaults(t *testing.T) {
 			config.DownloadSettings.ProgressUpdateInterval,
 		)
 	}
+	assertDefaultTorrentStallWarning(t, config)
 
 	if config.SecuritySettings.PasswordMinLength != 8 {
 		t.Errorf("Expected default password min length %d, got %d", 8, config.SecuritySettings.PasswordMinLength)
@@ -367,6 +368,13 @@ func TestConfigDefaults(t *testing.T) {
 
 	if config.VideoSettings.QualitySelector != "bv*+ba/b" {
 		t.Errorf("Expected default video quality selector 'bv*+ba/b', got '%s'", config.VideoSettings.QualitySelector)
+	}
+}
+
+func assertDefaultTorrentStallWarning(t *testing.T, cfg *Config) {
+	t.Helper()
+	if cfg.DownloadSettings.TorrentStallWarningAfter != 30*time.Minute {
+		t.Errorf("Expected default torrent stall warning after 30m, got %v", cfg.DownloadSettings.TorrentStallWarningAfter)
 	}
 }
 
@@ -459,6 +467,40 @@ func TestConfigEnvironmentVariableParsing(t *testing.T) {
 			envVar:   "YTDLP_PATH",
 			envValue: "/usr/local/bin/yt-dlp",
 			checkFn:  func(c *Config) bool { return c.YtdlpPath == "/usr/local/bin/yt-dlp" },
+		},
+		{
+			name:     "YTDLP_EXTRA_ARGS",
+			envVar:   "YTDLP_EXTRA_ARGS",
+			envValue: "--retries 10 --extractor-retries 3",
+			checkFn:  func(c *Config) bool { return c.YtdlpExtraArgs == "--retries 10 --extractor-retries 3" },
+		},
+		{
+			name:     "YTDLP_COOKIES_PATH",
+			envVar:   "YTDLP_COOKIES_PATH",
+			envValue: "/etc/telegram-media-server/youtube.cookies.txt",
+			checkFn: func(c *Config) bool {
+				return c.YtdlpCookiesPath == "/etc/telegram-media-server/youtube.cookies.txt"
+			},
+		},
+		{
+			name:     "YTDLP_COOKIES_CHECK_INTERVAL parsing",
+			envVar:   "YTDLP_COOKIES_CHECK_INTERVAL",
+			envValue: "24h",
+			checkFn:  func(c *Config) bool { return c.YtdlpCookiesCheckInterval == 24*time.Hour },
+		},
+		{
+			name:     "YTDLP_COOKIES_STATE_PATH",
+			envVar:   "YTDLP_COOKIES_STATE_PATH",
+			envValue: "/var/lib/telegram-media-server/youtube-cookie-state.json",
+			checkFn: func(c *Config) bool {
+				return c.YtdlpCookiesStatePath == "/var/lib/telegram-media-server/youtube-cookie-state.json"
+			},
+		},
+		{
+			name:     "YTDLP_COOKIES_CHECK_INTERVAL zero disables checks",
+			envVar:   "YTDLP_COOKIES_CHECK_INTERVAL",
+			envValue: "0",
+			checkFn:  func(c *Config) bool { return c.YtdlpCookiesCheckInterval == 0 },
 		},
 		{
 			name:     "YTDLP_UPDATE_MODE pip",

@@ -17,10 +17,12 @@ type Movie struct {
 	// QBittorrentHash: set when downloaded via qBittorrent; used to remove from Web UI on delete.
 	// Explicit column matches migrations and SetQBittorrentHash(..., "qbittorrent_hash", ...).
 	// Without it, GORM may use q_bittorrent_hash and reads would miss the stored value.
-	QBittorrentHash string      `json:"qbittorrent_hash"      gorm:"not null;default:'';column:qbittorrent_hash"`
-	Files           []MovieFile `json:"files"                 gorm:"foreignKey:MovieID"`
-	CreatedAt       time.Time   `json:"created_at"            gorm:"autoCreateTime"`
-	UpdatedAt       time.Time   `json:"updated_at"            gorm:"autoUpdateTime"`
+	QBittorrentHash string `json:"qbittorrent_hash"      gorm:"not null;default:'';column:qbittorrent_hash"`
+	// TorrentStallNotified is internal lifecycle state and is intentionally omitted from the HTTP API.
+	TorrentStallNotified bool        `json:"-"                     gorm:"not null;default:false;column:torrent_stall_notified"`
+	Files                []MovieFile `json:"files"                 gorm:"foreignKey:MovieID"`
+	CreatedAt            time.Time   `json:"created_at"            gorm:"autoCreateTime"`
+	UpdatedAt            time.Time   `json:"updated_at"            gorm:"autoUpdateTime"`
 }
 
 type MovieFile struct {

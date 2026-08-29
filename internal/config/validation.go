@@ -133,6 +133,9 @@ func (c *Config) validateDownloadSettings() error {
 	if c.DownloadSettings.DownloadTimeout < 0 {
 		return errors.New("DOWNLOAD_TIMEOUT cannot be negative")
 	}
+	if c.DownloadSettings.TorrentStallWarningAfter < 0 {
+		return errors.New("TORRENT_STALL_WARNING_AFTER cannot be negative")
+	}
 
 	return nil
 }

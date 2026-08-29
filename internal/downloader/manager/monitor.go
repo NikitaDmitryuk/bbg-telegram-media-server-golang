@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/NikitaDmitryuk/telegram-media-server/internal/database"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/downloader"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/logutils"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/tvcompat"
@@ -37,6 +38,20 @@ func (dm *DownloadManager) monitorDownload(
 		downloadStartTime    = time.Now()
 		maxStagnantDuration  = 30 * time.Minute
 	)
+	stallTolerant := false
+	if tolerant, ok := job.downloader.(downloader.StallTolerantDownloader); ok {
+		stallTolerant = tolerant.AllowsIndefiniteStall()
+	}
+	stallNotified := false
+	stallStore, hasStallStore := dm.db.(database.TorrentStallStore)
+	if stallTolerant {
+		progressStagnantTime = downloadStartTime
+		if hasStallStore {
+			if persisted, err := stallStore.TorrentStallNotified(context.Background(), movieID); err == nil {
+				stallNotified = persisted
+			}
+		}
+	}
 
 	updateTicker := time.NewTicker(dm.downloadSettings.ProgressUpdateInterval)
 	defer updateTicker.Stop()
@@ -57,7 +72,16 @@ func (dm *DownloadManager) monitorDownload(
 				continue
 			}
 			// Episode completion means the download is progressing; reset stagnation timer.
-			progressStagnantTime = time.Time{}
+			if stallTolerant {
+				progressStagnantTime = time.Now()
+				if stallNotified && hasStallStore {
+					if resetErr := stallStore.SetTorrentStallNotified(context.Background(), movieID, false); resetErr == nil {
+						stallNotified = false
+					}
+				}
+			} else {
+				progressStagnantTime = time.Time{}
+			}
 			if updateErr := dm.db.UpdateEpisodesProgress(context.Background(), movieID, completed); updateErr != nil {
 				logutils.Log.WithError(updateErr).WithField("movie_id", movieID).Error("Failed to update episodes progress")
 			}
@@ -151,7 +175,16 @@ func (dm *DownloadManager) monitorDownload(
 			const significantProgressChange = 0.1
 			if progressDiff > significantProgressChange {
 				lastProgress = progress
-				progressStagnantTime = time.Time{}
+				if stallTolerant {
+					progressStagnantTime = currentTime
+					if stallNotified && hasStallStore {
+						if resetErr := stallStore.SetTorrentStallNotified(context.Background(), movieID, false); resetErr == nil {
+							stallNotified = false
+						}
+					}
+				} else {
+					progressStagnantTime = time.Time{}
+				}
 			} else if progressStagnantTime.IsZero() && progress > 0 {
 				progressStagnantTime = currentTime
 			}
@@ -171,7 +204,7 @@ func (dm *DownloadManager) monitorDownload(
 				}
 			}
 
-			if !progressStagnantTime.IsZero() && currentTime.Sub(progressStagnantTime) > maxStagnantDuration {
+			if !stallTolerant && !progressStagnantTime.IsZero() && currentTime.Sub(progressStagnantTime) > maxStagnantDuration {
 				err := fmt.Errorf("download appears to be stagnant (no progress for %v)", maxStagnantDuration)
 				logutils.Log.WithError(err).WithField("movie_id", movieID).Warn("Download stagnant")
 				outerErrChan <- err
@@ -229,6 +262,14 @@ func (dm *DownloadManager) monitorDownload(
 			return
 
 		case <-updateTicker.C:
+			if stallTolerant && dm.downloadSettings.TorrentStallWarningAfter > 0 && !stallNotified &&
+				!progressStagnantTime.IsZero() && time.Since(progressStagnantTime) >= dm.downloadSettings.TorrentStallWarningAfter {
+				if !hasStallStore || stallStore.SetTorrentStallNotified(context.Background(), movieID, true) == nil {
+					stallNotified = true
+					job.queueNotifier.OnStalled(movieID, job.title)
+					logutils.Log.WithField("movie_id", movieID).Warn("Torrent download is stalled; notification sent")
+				}
+			}
 			// Periodic logging for debugging
 			dm.mu.RLock()
 			if _, exists := dm.jobs[movieID]; exists {

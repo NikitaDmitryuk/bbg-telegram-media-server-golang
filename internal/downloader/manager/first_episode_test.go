@@ -85,6 +85,7 @@ func (n *firstEpisodeTestNotifier) OnFirstEpisodeReady(movieID uint, title strin
 	n.mu.Unlock()
 }
 func (*firstEpisodeTestNotifier) OnVideoNotSupported(uint, string) {}
+func (*firstEpisodeTestNotifier) OnStalled(uint, string)           {}
 
 func TestFirstEpisodeReadyNotification(t *testing.T) {
 	logutils.InitLogger("debug")

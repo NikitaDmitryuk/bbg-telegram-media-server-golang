@@ -180,6 +180,28 @@ The application updates yt-dlp on start and then on a schedule (default: every 3
 Для ручной установки используйте `YTDLP_UPDATE_MODE=pip` с venv/pip-установкой или `YTDLP_UPDATE_MODE=self` для standalone binary, который поддерживает `yt-dlp -U`. Версии из репозитория ОС часто не поддерживают самообновление и могут отставать.  
 For manual installs, use `YTDLP_UPDATE_MODE=pip` with a venv/pip install or `YTDLP_UPDATE_MODE=self` for a standalone binary that supports `yt-dlp -U`. OS package versions often do not support self-update and can lag behind.
 
+Дополнительные retry-параметры задаются через `YTDLP_EXTRA_ARGS`; приложение применяет их и к единственному metadata-запросу, и к самой загрузке. Значение разбивается по пробелам, поэтому аргументы со значениями, содержащими пробелы, не поддерживаются.
+
+Для видео, требующих входа или подтверждения возраста, поддерживается `YTDLP_COOKIES_PATH`. Cookies должны быть в Netscape-формате и не должны попадать в Git. Для Ansible укажите абсолютный локальный путь в игнорируемом `ops/ansible/group_vars/telegram_server.yml`:
+
+```yaml
+tms_ytdlp_cookies_src: "{{ lookup('env', 'HOME') }}/.config/telegram-media-server/youtube.cookies.txt"
+```
+
+Ansible проверит файл и скопирует его в `/etc/telegram-media-server/youtube.cookies.txt` с правами `0640`. Экспортируйте cookies из отдельного incognito-сеанса по [официальной инструкции yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies); после экспорта не открывайте этот сеанс снова.
+
+Для server-managed режима вместо локального файла включите только следующую переменную:
+
+```yaml
+tms_ytdlp_managed_cookies: true
+```
+
+После `make install` выполните `make ytdlp-cookies-login`. Команда запускает временный Chromium на сервере, пробрасывает его DevTools только через SSH на `http://127.0.0.1:9222` и показывает удалённую вкладку через screencast. Войдите в отдельный Google-аккаунт, подтвердите вход телефоном, откройте `https://www.youtube.com/robots.txt` и вернитесь в терминал. Экспортёр оставит только `youtube.com` cookies, проверит `:ythistory`, установит jar атомарно и удалит весь браузерный профиль. Пароль, 2FA и профиль не сохраняются.
+
+Приложение проверяет jar раз в сутки (`YTDLP_COOKIES_CHECK_INTERVAL=24h`) и сохраняет обновлённые cookies, полученные от YouTube. После окончательного отзыва сессии cookies отключаются: публичные видео продолжают работать анонимно, а каждый текущий Telegram-администратор получает одно сообщение без повторов. После следующего успешного входа latch молча сбрасывается. Значение интервала `0` отключает фоновую проверку; пустой `YTDLP_COOKIES_PATH` полностью сохраняет старый анонимный режим.
+
+The managed mode uses an SSH-only temporary Chromium session, filters the export to YouTube domains, validates and refreshes the jar daily, and deletes the browser profile after every login. When the session expires, cookies are disabled so public videos continue anonymously, and each Telegram administrator receives one notification for that expiry episode. No password, 2FA secret, browser profile, or cookie content is committed or logged.
+
 ---
 
 ## Конфигурация / Configuration
@@ -209,8 +231,9 @@ Create a `.env` file based on `.env.example` and configure the required paramete
 **qBittorrent:** Ansible настраивает `qbittorrent-nox` на `127.0.0.1:8081`, тот же `MOVIE_PATH`, что и TMS, и синхронизирует учетные данные с `/etc/telegram-media-server/.env`.  
 **qBittorrent:** Ansible configures `qbittorrent-nox` on `127.0.0.1:8081`, uses the same `MOVIE_PATH` as TMS, and syncs credentials into `/etc/telegram-media-server/.env`.
 
-Если `QBITTORRENT_URL` задан, ошибки подключения/логина qBittorrent считаются ошибками конфигурации и не скрываются автоматическим переходом на aria2. Для намеренного fallback задайте `TORRENT_FALLBACK_TO_ARIA2=true`. После перезагрузки TMS повторно логинится в qBittorrent Web API и восстанавливает мониторинг незавершённых загрузок по сохранённому hash.  
-When `QBITTORRENT_URL` is set, qBittorrent connection/login failures are treated as configuration errors and are not hidden by automatic aria2 fallback. Set `TORRENT_FALLBACK_TO_ARIA2=true` only if you intentionally want that fallback. After reboot, TMS logs in to the qBittorrent Web API again and resumes monitoring incomplete downloads by the stored hash.
+Если `QBITTORRENT_URL` задан, TMS повторно авторизуется после `401/403` и пережидает временную недоступность Web API с ограниченным backoff, не удаляя торрент. Для намеренного fallback при ошибке первоначального запуска задайте `TORRENT_FALLBACK_TO_ARIA2=true`. После перезагрузки мониторинг восстанавливается по сохранённому hash; отсутствующий торрент продолжает ожидаться. Раздача без прогресса не удаляется: через `TORRENT_STALL_WARNING_AFTER` (по умолчанию `30m`, `0` отключает) отправляется одно предупреждение на эпизод простоя.
+
+When `QBITTORRENT_URL` is set, TMS reauthenticates after `401/403` and waits through temporary Web API outages with capped backoff without deleting the torrent. Set `TORRENT_FALLBACK_TO_ARIA2=true` only for intentional fallback after an initial start failure. After reboot, monitoring resumes by the stored hash and keeps waiting if the torrent is absent. A torrent with no progress is retained; `TORRENT_STALL_WARNING_AFTER` (default `30m`, `0` disables it) controls one warning per stall episode.
 
 Совместимость с ТВ: если видео не воспроизводится — `VIDEO_COMPATIBILITY_MODE=true`. Файлы при необходимости пройдут remux. Опции: `VIDEO_TV_H264_LEVEL=4.0`/`4.1`, `VIDEO_REJECT_INCOMPATIBLE=true` — отклонять несовместимое видео.  
 TV compatibility: if video won't play on your TV, set `VIDEO_COMPATIBILITY_MODE=true`. Files may be remuxed. Options: `VIDEO_TV_H264_LEVEL=4.0`/`4.1`, `VIDEO_REJECT_INCOMPATIBLE=true` — reject incompatible video.

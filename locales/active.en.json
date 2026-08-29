@@ -19,6 +19,7 @@
         "downloaded_list": "ID:{{.ID}} {{.Sticker}}[{{.Progress}}] {{.Episodes}}{{.SizeGB}}\n{{.Name}}\n",
         "first_episode_ready": "▶️ First episode of «{{.Title}}» is ready to watch.",
         "video_not_supported": "⚠️ Video «{{.Title}}» is not supported by your TV (codec/H.264 level). Download cancelled.",
+        "torrent_stalled": "⚠️ Torrent «{{.Title}}» has made no progress for a long time. It will keep waiting for metadata or peers.",
         "unit_gb": "GB",
         "disk_space_info": "Available disk space: {{.AvailableSpaceGB}} GB",
         "video_successfully_downloaded": "✅ Video successfully downloaded: {{.Title}}",
@@ -75,6 +76,8 @@
             "not_enough_space": "Not enough space to download the movie."
         },
         "downloads": {
+			"video_authentication_required": "YouTube requires authentication for this video. Configure a valid yt-dlp cookies file and try again.",
+			"youtube_cookies_expired": "YouTube cookies have expired. Public videos will continue to work anonymously; renew cookies with make ytdlp-cookies-login.",
             "video_title_error": "Error retrieving video title: {{.Error}}",
             "video_size_error": "Error retrieving video size: {{.Error}}",
             "video_download_error": "Error downloading video: {{.Error}}",

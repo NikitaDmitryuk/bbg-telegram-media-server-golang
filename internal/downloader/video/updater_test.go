@@ -183,3 +183,27 @@ func TestRunUpdate_InvalidMode_ReturnsWithoutRunning(t *testing.T) {
 		t.Fatalf("invalid mode should not run updater command, stat err=%v", err)
 	}
 }
+
+func TestRunUpdate_SkipsWhileYTDLPIsInUse(t *testing.T) {
+	if runtime.GOOS == windowsGOOS {
+		t.Skip("skipping fake yt-dlp script test on Windows")
+	}
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "yt-dlp")
+	calledPath := filepath.Join(tmpDir, "called")
+	script := fmt.Sprintf("#!/bin/sh\nprintf called > %q\n", calledPath)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatalf("write fake yt-dlp: %v", err)
+	}
+	if err := os.Chmod(scriptPath, 0o700); err != nil {
+		t.Fatalf("chmod fake yt-dlp: %v", err)
+	}
+
+	releaseExecution := acquireYTDLPExecution()
+	RunUpdate(context.Background(), scriptPath, "self", "python3")
+	releaseExecution()
+
+	if _, err := os.Stat(calledPath); !os.IsNotExist(err) {
+		t.Fatalf("updater should not run while yt-dlp is in use, stat err=%v", err)
+	}
+}

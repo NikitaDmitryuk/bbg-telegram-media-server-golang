@@ -7,6 +7,7 @@ type QueueNotifier interface {
 	OnStarted(movieID uint, title string)
 	OnFirstEpisodeReady(movieID uint, title string)
 	OnVideoNotSupported(movieID uint, title string)
+	OnStalled(movieID uint, title string)
 }
 
 // Noop is a QueueNotifier that does nothing. Use for API-originated downloads (no in-progress messages)
@@ -19,3 +20,4 @@ func (noopQueueNotifier) OnQueued(uint, string, int, int)  {}
 func (noopQueueNotifier) OnStarted(uint, string)           {}
 func (noopQueueNotifier) OnFirstEpisodeReady(uint, string) {}
 func (noopQueueNotifier) OnVideoNotSupported(uint, string) {}
+func (noopQueueNotifier) OnStalled(uint, string)           {}

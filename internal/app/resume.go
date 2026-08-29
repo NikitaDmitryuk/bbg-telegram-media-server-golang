@@ -7,8 +7,8 @@ import (
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/database"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/downloader/qbittorrent"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/filemanager"
+	tmslang "github.com/NikitaDmitryuk/telegram-media-server/internal/lang"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/logutils"
-	"github.com/NikitaDmitryuk/telegram-media-server/internal/notifier"
 )
 
 const (
@@ -47,8 +47,6 @@ func resumeIncompleteQBittorrentDownload(ctx context.Context, a *App, movie *dat
 		if err := waitForQBittorrentReady(ctx, a); err != nil {
 			logutils.Log.WithError(err).WithFields(map[string]any{
 				"movie_id": movie.ID,
-				"url":      a.Config.QBittorrentURL,
-				"username": a.Config.QBittorrentUsername,
 			}).Warn("qBittorrent is not ready for resume; will retry")
 			sleepWithContext(ctx, delay)
 			delay = nextResumeDelay(delay)
@@ -74,7 +72,7 @@ func resumeIncompleteQBittorrentDownload(ctx context.Context, a *App, movie *dat
 			dl,
 			movie.Name,
 			movie.TotalEpisodes,
-			notifier.Noop,
+			NewAdminQueueNotifier(a),
 		)
 		if err != nil {
 			logutils.Log.WithError(err).WithField("movie_id", movie.ID).Warn("Failed to attach resumed qBittorrent download; will retry")
@@ -83,7 +81,6 @@ func resumeIncompleteQBittorrentDownload(ctx context.Context, a *App, movie *dat
 			continue
 		}
 
-		delay = qbittorrentResumeInitialDelay
 		err = <-completionChan
 		if err == nil {
 			logutils.Log.WithField("movie_id", movie.ID).Info("Resumed qBittorrent download completed successfully")
@@ -104,6 +101,29 @@ func resumeIncompleteQBittorrentDownload(ctx context.Context, a *App, movie *dat
 	}
 }
 
+type adminQueueNotifier struct {
+	app *App
+}
+
+func NewAdminQueueNotifier(a *App) adminQueueNotifier { return adminQueueNotifier{app: a} }
+
+func (adminQueueNotifier) OnQueued(uint, string, int, int)  {}
+func (adminQueueNotifier) OnStarted(uint, string)           {}
+func (adminQueueNotifier) OnFirstEpisodeReady(uint, string) {}
+func (adminQueueNotifier) OnVideoNotSupported(uint, string) {}
+
+func (n adminQueueNotifier) OnStalled(_ uint, title string) {
+	chatIDs, err := n.app.DB.ListAdminChatIDs(context.Background())
+	if err != nil {
+		logutils.Log.WithError(err).Warn("Failed to list administrators for torrent stall notification")
+		return
+	}
+	message := tmslang.Translate("general.torrent_stalled", map[string]any{"Title": title})
+	for _, chatID := range chatIDs {
+		n.app.Bot.SendMessage(chatID, message, nil)
+	}
+}
+
 func waitForQBittorrentReady(ctx context.Context, a *App) error {
 	client, err := qbittorrent.NewClient(a.Config.QBittorrentURL, a.Config.QBittorrentUsername, a.Config.QBittorrentPassword)
 	if err != nil {
@@ -116,9 +136,7 @@ func waitForQBittorrentReady(ctx context.Context, a *App) error {
 		return err
 	}
 	logutils.Log.WithFields(map[string]any{
-		"url":      a.Config.QBittorrentURL,
-		"username": a.Config.QBittorrentUsername,
-		"version":  version,
+		"version": version,
 	}).Info("qBittorrent Web API login check succeeded")
 	return nil
 }

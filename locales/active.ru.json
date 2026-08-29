@@ -19,6 +19,7 @@
         "downloaded_list": "ID:{{.ID}} {{.Sticker}}[{{.Progress}}] {{.Episodes}}{{.SizeGB}}\n{{.Name}}\n",
         "first_episode_ready": "▶️ Первая серия «{{.Title}}» готова к просмотру.",
         "video_not_supported": "⚠️ Видео «{{.Title}}» не поддерживается вашим ТВ (кодек/уровень H.264). Загрузка отменена.",
+        "torrent_stalled": "⚠️ Торрент «{{.Title}}» долго не продвигается. Он продолжит ждать метаданные или доступных пиров.",
         "unit_gb": "ГБ",
         "disk_space_info": "Свободное место на диске: {{.AvailableSpaceGB}} ГБ",
         "video_successfully_downloaded": "✅ Видео успешно загружено: {{.Title}}",
@@ -75,6 +76,8 @@
             "not_enough_space": "Недостаточно места для загрузки фильма."
         },
         "downloads": {
+			"video_authentication_required": "YouTube требует авторизацию для этого видео. Настройте актуальный cookies-файл для yt-dlp и повторите попытку.",
+			"youtube_cookies_expired": "YouTube cookies протухли. Публичные видео продолжат загружаться анонимно; обновите cookies командой make ytdlp-cookies-login.",
             "video_title_error": "Ошибка получения названия видео: {{.Error}}",
             "video_size_error": "Ошибка получения размера видео: {{.Error}}",
             "video_download_error": "Ошибка загрузки видео: {{.Error}}",

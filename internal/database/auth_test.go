@@ -28,6 +28,27 @@ func setupTestDB(t *testing.T) *SQLiteDatabase {
 	return &SQLiteDatabase{db: db}
 }
 
+func TestSQLiteDatabase_ListAdminChatIDs(t *testing.T) {
+	db := setupTestDB(t)
+	defer closeTestDB(db)
+	expired := time.Now().Add(-time.Hour)
+	users := []User{
+		{Name: "admin", ChatID: 10, Role: AdminRole},
+		{Name: "regular", ChatID: 20, Role: RegularRole},
+		{Name: "expired-admin", ChatID: 30, Role: AdminRole, ExpiresAt: &expired},
+	}
+	if err := db.db.Create(&users).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	chatIDs, err := db.ListAdminChatIDs(context.Background())
+	if err != nil {
+		t.Fatalf("list admins: %v", err)
+	}
+	if len(chatIDs) != 1 || chatIDs[0] != 10 {
+		t.Fatalf("admin chat ids=%v, want [10]", chatIDs)
+	}
+}
+
 func closeTestDB(db *SQLiteDatabase) {
 	if sqlDB, err := db.db.DB(); err == nil {
 		sqlDB.Close()

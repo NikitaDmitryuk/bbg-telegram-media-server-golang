@@ -123,6 +123,17 @@ func (s *SQLiteDatabase) IsUserAccessAllowed(ctx context.Context, chatID int64) 
 	return true, user.Role, nil
 }
 
+func (s *SQLiteDatabase) ListAdminChatIDs(ctx context.Context) ([]int64, error) {
+	var chatIDs []int64
+	err := s.withRetry(ctx, "ListAdminChatIDs", func() error {
+		return s.db.WithContext(ctx).
+			Model(&User{}).
+			Where("role = ? AND (expires_at IS NULL OR expires_at > ?)", AdminRole, time.Now()).
+			Pluck("chat_id", &chatIDs).Error
+	})
+	return chatIDs, err
+}
+
 func isTemporaryPasswordValid(passwords []TemporaryPassword) bool {
 	if len(passwords) == 0 {
 		return false

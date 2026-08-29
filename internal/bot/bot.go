@@ -2,17 +2,22 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	tmsconfig "github.com/NikitaDmitryuk/telegram-media-server/internal/config"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/logutils"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+var telegramTokenPattern = regexp.MustCompile(`bot\d+:[A-Za-z0-9_-]+`)
 
 // Service defines the interface for all bot operations.
 // Implementations must support sending messages, handling callbacks,
@@ -42,11 +47,33 @@ func InitBot(config *tmsconfig.Config) (*Bot, error) {
 
 	api, err := tgbotapi.NewBotAPIWithClient(config.BotToken, tgbotapi.APIEndpoint, httpClient)
 	if err != nil {
-		logutils.Log.WithError(err).Error("Error creating bot")
-		return nil, fmt.Errorf("error creating bot: %w", err)
+		safeErr := sanitizeBotError(err, config.BotToken, config.TelegramProxy)
+		logutils.Log.WithError(safeErr).Error("Error creating bot")
+		return nil, fmt.Errorf("error creating bot: %w", safeErr)
 	}
 	logutils.Log.Infof("Authorized on account %s", api.Self.UserName)
 	return &Bot{Api: api, Config: config, httpClient: httpClient}, nil
+}
+
+func sanitizeBotError(err error, sensitiveValues ...string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	for _, value := range sensitiveValues {
+		if value != "" {
+			message = strings.ReplaceAll(message, value, "<redacted>")
+		}
+	}
+	message = telegramTokenPattern.ReplaceAllString(message, "bot<redacted>")
+	return errors.New(message)
+}
+
+func (b *Bot) safeError(err error) error {
+	if b == nil || b.Config == nil {
+		return sanitizeBotError(err)
+	}
+	return sanitizeBotError(err, b.Config.BotToken, b.Config.TelegramProxy)
 }
 
 func buildHTTPClient(proxyAddr string) (*http.Client, error) {
@@ -81,7 +108,7 @@ func (b *Bot) SendMessage(chatID int64, text string, keyboard any) {
 		}
 	}
 	if _, err := b.Api.Send(msg); err != nil {
-		logutils.Log.WithError(err).Errorf("Message not sent: %s", text)
+		logutils.Log.WithError(b.safeError(err)).Errorf("Message not sent: %s", text)
 	}
 }
 
@@ -91,8 +118,9 @@ func (b *Bot) SendDocument(chatID int64, fileName string, data []byte) error {
 		Bytes: data,
 	})
 	if _, err := b.Api.Send(doc); err != nil {
-		logutils.Log.WithError(err).Errorf("Failed to send document %s to chat %d", fileName, chatID)
-		return err
+		safeErr := b.safeError(err)
+		logutils.Log.WithError(safeErr).Errorf("Failed to send document %s to chat %d", fileName, chatID)
+		return safeErr
 	}
 	logutils.Log.Infof("Document sent: %s", fileName)
 	return nil
@@ -101,22 +129,25 @@ func (b *Bot) SendDocument(chatID int64, fileName string, data []byte) error {
 func (b *Bot) DownloadFile(fileID, fileName string) error {
 	file, err := b.Api.GetFile(tgbotapi.FileConfig{FileID: fileID})
 	if err != nil {
-		logutils.Log.WithError(err).Error("Failed to get file")
-		return err
+		safeErr := b.safeError(err)
+		logutils.Log.WithError(safeErr).Error("Failed to get file")
+		return safeErr
 	}
 
 	fileURL := file.Link(b.Api.Token)
 	ctx := context.Background()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, http.NoBody)
 	if err != nil {
-		logutils.Log.WithError(err).Error("Failed to create HTTP request")
-		return err
+		safeErr := b.safeError(err)
+		logutils.Log.WithError(safeErr).Error("Failed to create HTTP request")
+		return safeErr
 	}
 
 	resp, err := b.httpClient.Do(req)
 	if err != nil {
-		logutils.Log.WithError(err).Error("Failed to download file")
-		return err
+		safeErr := b.safeError(err)
+		logutils.Log.WithError(safeErr).Error("Failed to download file")
+		return safeErr
 	}
 	defer resp.Body.Close()
 
@@ -138,7 +169,7 @@ func (b *Bot) DownloadFile(fileID, fileName string) error {
 
 func (b *Bot) AnswerCallbackQuery(callbackConfig tgbotapi.CallbackConfig) {
 	if _, err := b.Api.Request(callbackConfig); err != nil {
-		logutils.Log.WithError(err).Error("Failed to answer callback query")
+		logutils.Log.WithError(b.safeError(err)).Error("Failed to answer callback query")
 	} else {
 		logutils.Log.Info("Callback query answered successfully")
 	}
@@ -148,6 +179,7 @@ func (b *Bot) DeleteMessage(chatID int64, messageID int) error {
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 	_, err := b.Api.Request(deleteMsg)
 	if err != nil {
+		err = b.safeError(err)
 		logutils.Log.WithError(err).Errorf("Failed to delete message %d in chat %d", messageID, chatID)
 	}
 	return err
@@ -184,8 +216,9 @@ func (b *Bot) SendMessageReturningID(chatID int64, text string, keyboard any) (i
 	}
 	m, err := b.Api.Send(msg)
 	if err != nil {
-		logutils.Log.WithError(err).Errorf("Message not sent: %s", text)
-		return 0, err
+		safeErr := b.safeError(err)
+		logutils.Log.WithError(safeErr).Errorf("Message not sent: %s", text)
+		return 0, safeErr
 	}
 	return m.MessageID, nil
 }
@@ -193,8 +226,9 @@ func (b *Bot) SendMessageReturningID(chatID int64, text string, keyboard any) (i
 func (b *Bot) EditMessageTextAndMarkup(chatID int64, messageID int, text string, markup tgbotapi.InlineKeyboardMarkup) error {
 	editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, markup)
 	if _, err := b.Api.Send(editMsg); err != nil {
-		logutils.Log.WithError(err).Errorf("Failed to edit message %d in chat %d", messageID, chatID)
-		return err
+		safeErr := b.safeError(err)
+		logutils.Log.WithError(safeErr).Errorf("Failed to edit message %d in chat %d", messageID, chatID)
+		return safeErr
 	}
 	return nil
 }

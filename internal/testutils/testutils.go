@@ -199,6 +199,18 @@ func (t *TestSQLiteDatabase) UpdateDownloadedPercentage(ctx context.Context, mov
 		Update("downloaded_percentage", percentage).Error
 }
 
+func (t *TestSQLiteDatabase) TorrentStallNotified(ctx context.Context, movieID uint) (bool, error) {
+	var notified bool
+	err := t.db.WithContext(ctx).Model(&database.Movie{}).Where("id = ?", movieID).
+		Pluck("torrent_stall_notified", &notified).Error
+	return notified, err
+}
+
+func (t *TestSQLiteDatabase) SetTorrentStallNotified(ctx context.Context, movieID uint, notified bool) error {
+	return t.db.WithContext(ctx).Model(&database.Movie{}).Where("id = ?", movieID).
+		Update("torrent_stall_notified", notified).Error
+}
+
 func (t *TestSQLiteDatabase) UpdateEpisodesProgress(ctx context.Context, movieID uint, completedEpisodes int) error {
 	return t.db.WithContext(ctx).Model(&database.Movie{}).Where("id = ?", movieID).
 		Update("completed_episodes", completedEpisodes).Error
@@ -359,6 +371,8 @@ func (*TestSQLiteDatabase) GenerateTemporaryPassword(_ context.Context, _ time.D
 func (*TestSQLiteDatabase) GetUserByChatID(_ context.Context, _ int64) (database.User, error) {
 	return database.User{}, nil
 }
+
+func (*TestSQLiteDatabase) ListAdminChatIDs(_ context.Context) ([]int64, error) { return nil, nil }
 func (t *TestSQLiteDatabase) MovieExistsId(ctx context.Context, movieID uint) (bool, error) {
 	var count int64
 	if err := t.db.WithContext(ctx).Model(&database.Movie{}).Where("id = ?", movieID).Count(&count).Error; err != nil {

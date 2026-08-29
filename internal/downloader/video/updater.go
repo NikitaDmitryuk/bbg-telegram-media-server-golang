@@ -27,6 +27,12 @@ func RunUpdate(ctx context.Context, binaryPath, updateMode, pythonPath string) {
 		logutils.Log.Info("yt-dlp update disabled")
 		return
 	}
+	releaseUpdate, acquired := tryAcquireYTDLPUpdate()
+	if !acquired {
+		logutils.Log.Info("yt-dlp update skipped because yt-dlp is currently in use")
+		return
+	}
+	defer releaseUpdate()
 	updateCtx, cancel := context.WithTimeout(ctx, updateTimeout)
 	defer cancel()
 

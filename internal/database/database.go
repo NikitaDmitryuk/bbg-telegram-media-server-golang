@@ -51,6 +51,7 @@ type AuthStore interface {
 	ExtendTemporaryUser(ctx context.Context, chatID int64, newExpiration time.Time) error
 	GenerateTemporaryPassword(ctx context.Context, duration time.Duration) (string, error)
 	GetUserByChatID(ctx context.Context, chatID int64) (User, error)
+	ListAdminChatIDs(ctx context.Context) ([]int64, error)
 }
 
 // Database is the full storage interface. Embed MovieReader, MovieWriter, AuthStore and Init for backward compatibility.
@@ -59,6 +60,13 @@ type Database interface {
 	MovieReader
 	MovieWriter
 	AuthStore
+}
+
+// TorrentStallStore is an optional persistence capability used by the download
+// manager. Keeping it separate avoids widening lightweight test and API stores.
+type TorrentStallStore interface {
+	TorrentStallNotified(ctx context.Context, movieID uint) (bool, error)
+	SetTorrentStallNotified(ctx context.Context, movieID uint, notified bool) error
 }
 
 func NewDatabase(config *tmsconfig.Config) (Database, error) {

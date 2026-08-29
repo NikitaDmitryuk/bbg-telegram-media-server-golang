@@ -58,6 +58,7 @@ telegram-media-server
 !integration/fixtures/big-buck-bunny.torrent
 
 .mypy_cache/
+__pycache__/
 logs.txt
 
 .cursor/

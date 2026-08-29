@@ -3,6 +3,8 @@ package utils
 import (
 	"errors"
 	"strings"
+
+	"github.com/NikitaDmitryuk/telegram-media-server/internal/downloader"
 )
 
 var (
@@ -54,6 +56,9 @@ func RootError(err error) error {
 // DownloadErrorMessage returns a human-readable message for download errors (root cause, friendly text for invalid magnet).
 // Use from both API and Telegram so the same message shape is shown.
 func DownloadErrorMessage(err error) string {
+	if errors.Is(err, downloader.ErrVideoAuthenticationRequired) {
+		return downloader.ErrVideoAuthenticationRequired.Error()
+	}
 	rootErr := RootError(err)
 	msg := rootErr.Error()
 	if strings.Contains(msg, "invalid magnet") {

@@ -90,6 +90,21 @@ func main() {
 	defer cancel()
 
 	tmsfactory.StartPeriodicUpdaters(ctx, config)
+	tmsfactory.StartCookieMonitor(ctx, config, func(notifyCtx context.Context) bool {
+		chatIDs, listErr := db.ListAdminChatIDs(notifyCtx)
+		if listErr != nil {
+			logutils.Log.WithError(listErr).Warn("Failed to list administrators for yt-dlp cookie notification")
+			return false
+		}
+		if len(chatIDs) == 0 {
+			return false
+		}
+		message := lang.Translate("error.downloads.youtube_cookies_expired", nil)
+		for _, chatID := range chatIDs {
+			botInstance.SendMessage(chatID, message, nil)
+		}
+		return true
+	})
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

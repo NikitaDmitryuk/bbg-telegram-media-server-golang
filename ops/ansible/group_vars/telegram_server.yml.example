@@ -21,7 +21,20 @@ tms_ytdlp_update_mode: pip
 tms_ytdlp_python_path: "{{ tms_ytdlp_venv_dir }}/bin/python"
 tms_ytdlp_update_on_start: true
 tms_ytdlp_update_interval: 3h
+tms_ytdlp_extra_args: ""
+tms_ytdlp_cookies_check_interval: 24h
+tms_ytdlp_cookies_state_path: "{{ tms_home }}/youtube-cookie-state.json"
+# Optional absolute controller-side path. Keep the cookies file outside Git.
+# Example: "{{ lookup('env', 'HOME') }}/.config/telegram-media-server/youtube.cookies.txt"
+tms_ytdlp_cookies_src: ""
+tms_ytdlp_cookies_dest: "{{ tms_config_dir }}/youtube.cookies.txt"
+# Managed mode provides a temporary Chromium login over an SSH tunnel and
+# keeps the resulting YouTube-only cookie jar on the server.
+tms_ytdlp_managed_cookies: false
+tms_ytdlp_managed_cookies_dir: "{{ tms_home }}/youtube-auth"
+tms_ytdlp_login_service_name: telegram-media-server-youtube-login
 tms_torrent_fallback_to_aria2: false
+tms_torrent_stall_warning_after: 30m
 tms_enable_prowlarr: true
 tms_enable_minidlna: false
 tms_enable_tv_compatibility: false

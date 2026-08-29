@@ -80,7 +80,7 @@ func CreateDownloaderFromURL(ctx context.Context, rawURL, moviePath string, cfg 
 	}
 
 	// Otherwise treat as video URL (yt-dlp)
-	return ytdlp.NewYTDLPDownloader(rawURL, cfg), nil
+	return ytdlp.NewYTDLPDownloaderContext(ctx, rawURL, cfg)
 }
 
 // CreateDownloaderFromTorrentData writes bencoded .torrent bytes into moviePath and returns a torrent downloader (qBittorrent or aria2).
@@ -291,7 +291,7 @@ func downloadTorrentFile(ctx context.Context, fileURL, moviePath string) (string
 
 func RunUpdatersOnStart(ctx context.Context, cfg *config.Config) {
 	if cfg.YtdlpUpdateOnStart {
-		go newYtdlpUpdater(cfg).RunUpdate(ctx)
+		newYtdlpUpdater(cfg).RunUpdate(ctx)
 	}
 }
 
@@ -299,6 +299,10 @@ func StartPeriodicUpdaters(ctx context.Context, cfg *config.Config) {
 	if cfg.YtdlpUpdateInterval > 0 {
 		go downloader.StartPeriodicUpdater(ctx, cfg.YtdlpUpdateInterval, newYtdlpUpdater(cfg))
 	}
+}
+
+func StartCookieMonitor(ctx context.Context, cfg *config.Config, notify ytdlp.CookieNotifier) {
+	go ytdlp.StartCookieMonitor(ctx, cfg, notify)
 }
 
 func newYtdlpUpdater(cfg *config.Config) downloader.Updater {

@@ -1,0 +1,51 @@
+name: Agent Context
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - AGENTS.md
+      - CLAUDE.md
+      - GEMINI.md
+      - .agents/**
+      - scripts/validate_agent_context.py
+      - scripts/test_validate_agent_context.py
+      - Makefile
+      - .pre-commit-config.yaml
+      - .github/workflows/agent-context.yml
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - AGENTS.md
+      - CLAUDE.md
+      - GEMINI.md
+      - .agents/**
+      - scripts/validate_agent_context.py
+      - scripts/test_validate_agent_context.py
+      - Makefile
+      - .pre-commit-config.yaml
+      - .github/workflows/agent-context.yml
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate repository context
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Run validator unit tests
+        run: python3 -m unittest scripts/test_validate_agent_context.py
+
+      - name: Validate context
+        run: python3 scripts/validate_agent_context.py --github
+
+      - name: Check memory freshness
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python3 scripts/validate_agent_context.py --check-stale --stale-after-days 180 --github

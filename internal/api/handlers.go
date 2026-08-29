@@ -17,7 +17,6 @@ import (
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/downloader/factory"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/filemanager"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/logutils"
-	"github.com/NikitaDmitryuk/telegram-media-server/internal/notifier"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/prowlarr"
 	"github.com/NikitaDmitryuk/telegram-media-server/internal/utils"
 )
@@ -276,7 +275,7 @@ func AddDownload(w http.ResponseWriter, r *http.Request, a *app.App) {
 		writeValidateDownloadStartError(w, ctx, validateErr)
 		return
 	}
-	movieID, _, completionChan, err := a.DownloadManager.StartDownload(dl, notifier.Noop)
+	movieID, _, completionChan, err := a.DownloadManager.StartDownload(dl, app.NewAdminQueueNotifier(a))
 	if err != nil {
 		logutils.Log.WithError(err).WithField("request_id", RequestIDFromContext(ctx)).Error("AddDownload: StartDownload failed")
 		writeError(w, http.StatusInternalServerError, utils.DownloadErrorMessage(err))

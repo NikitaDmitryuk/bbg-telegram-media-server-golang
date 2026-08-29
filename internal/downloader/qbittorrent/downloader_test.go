@@ -1,6 +1,38 @@
 package qbittorrent
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestRetryControlCallRecoversAfterTransientFailures(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	err := retryControlCallWithBackoff(context.Background(), "test", func() error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("temporary")
+		}
+		return nil
+	}, func(int) time.Duration { return 0 })
+	if err != nil || attempts != 3 {
+		t.Fatalf("err=%v attempts=%d, want nil and 3", err, attempts)
+	}
+}
+
+func TestRetryControlCallStopsOnContextCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := retryControlCallWithBackoff(ctx, "test", func() error {
+		return errors.New("temporary")
+	}, func(int) time.Duration { return time.Hour })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v, want context.Canceled", err)
+	}
+}
 
 func TestQbittorrentTorrentReadyToFinalize(t *testing.T) {
 	t.Parallel()
@@ -32,6 +64,16 @@ func TestQbittorrentTorrentReadyToFinalize(t *testing.T) {
 		{
 			name: "metaDL_never_true",
 			ti:   TorrentInfo{State: "metaDL", Progress: 1.0, Size: 1, AmountLeft: 0},
+			want: false,
+		},
+		{
+			name: "error_never_true",
+			ti:   TorrentInfo{State: "error", Progress: 1.0, Size: 1, AmountLeft: 0},
+			want: false,
+		},
+		{
+			name: "missingFiles_never_true",
+			ti:   TorrentInfo{State: "missingFiles", Progress: 1.0, Size: 1, AmountLeft: 0},
 			want: false,
 		},
 		{
