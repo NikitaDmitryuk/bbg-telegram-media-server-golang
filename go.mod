@@ -7,7 +7,7 @@ require (
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/google/uuid v1.6.0
-	github.com/jackpal/bencode-go v1.0.2
+	github.com/jackpal/bencode-go v1.1.0
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	golang.org/x/text v0.41.0
 	gorm.io/driver/sqlite v1.6.0
