@@ -10,8 +10,8 @@ github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1 h1:wG8n/XJQ07TmjbITcGi
 github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1/go.mod h1:A2S0CWkNylc2phvKXWBBdD3K0iGnDBGbzRpISP2zBl8=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/jackpal/bencode-go v1.0.2 h1:LcCNfZ344u0LpBPOZNjpCLps/wUOuN4r87Fy9+5yU8g=
-github.com/jackpal/bencode-go v1.0.2/go.mod h1:6jI9mUjO3GQbZti3JizEfxTzRfWOM8oBBcwbwlTfceI=
+github.com/jackpal/bencode-go v1.2.0 h1:KE8gqa0AVB+1OeAC/q9AOMGy9hl+zpcgshmN8Jloe70=
+github.com/jackpal/bencode-go v1.2.0/go.mod h1:6jI9mUjO3GQbZti3JizEfxTzRfWOM8oBBcwbwlTfceI=
 github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD/E=
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=
 github.com/jinzhu/now v1.1.5 h1:/o9tlHleP7gOFmsnYNz3RGnqzefHA47wQpKrrdTIwXQ=
